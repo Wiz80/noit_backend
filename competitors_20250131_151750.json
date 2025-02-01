@@ -1,0 +1,74 @@
+{
+    "competitors": [
+        {
+            "full_name": "Paulis Makeup",
+            "key_feature": "Importación y venta mayorista de productos cosméticos",
+            "website": "https://paulismakeup.com",
+            "instagram": "@paulismakeup",
+            "similarity_score": 65
+        },
+        {
+            "full_name": "Kromaspace",
+            "key_feature": "Productos exclusivos para mayoristas y profesionales",
+            "website": "https://kromaspace.com",
+            "instagram": "@kromaspace",
+            "similarity_score": 70
+        },
+        {
+            "full_name": "Dinda Cosmetics",
+            "key_feature": "Amplio catálogo de productos de belleza y cuidado personal",
+            "website": "https://dindacosmetics.com",
+            "instagram": "@dindacosmetics",
+            "similarity_score": 75
+        },
+        {
+            "full_name": "NIVEA Men",
+            "key_feature": "Línea específica para el cuidado de la piel masculina",
+            "website": "https://www.nivea.com.co/productos/nivea-men",
+            "instagram": "@niveamen_co",
+            "similarity_score": 85
+        },
+        {
+            "full_name": "L'Oréal Men Expert",
+            "key_feature": "Productos especializados para hombres",
+            "website": "https://www.lorealparis.com.co/men-expert",
+            "instagram": "@lorealmenparis",
+            "similarity_score": 80
+        },
+        {
+            "full_name": "Biotherm Homme",
+            "key_feature": "Cuidado de la piel premium para hombres",
+            "website": "https://www.biotherm.com.co/biotherm-homme",
+            "instagram": "@biothermhomme",
+            "similarity_score": 75
+        },
+        {
+            "full_name": "Kiehl's",
+            "key_feature": "Productos naturales de alta calidad",
+            "website": "https://www.kiehls.com.co",
+            "instagram": "@kiehlscolombia",
+            "similarity_score": 70
+        },
+        {
+            "full_name": "Bulldog Skincare",
+            "key_feature": "Productos naturales específicos para hombres",
+            "website": "https://www.bulldogskincare.com",
+            "instagram": "@bulldogskincare",
+            "similarity_score": 85
+        },
+        {
+            "full_name": "The Body Shop",
+            "key_feature": "Productos éticos y naturales",
+            "website": "https://www.thebodyshop.com.co",
+            "instagram": "@thebodyshopco",
+            "similarity_score": 65
+        },
+        {
+            "full_name": "Clinique For Men",
+            "key_feature": "Cuidado de la piel dermatológicamente probado",
+            "website": "https://www.clinique.com.co/clinique-for-men",
+            "instagram": "@clinique",
+            "similarity_score": 75
+        }
+    ]
+}

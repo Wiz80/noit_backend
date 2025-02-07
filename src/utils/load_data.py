@@ -32,7 +32,9 @@ def load_competitor_data() -> List[Dict]:
         Returns:
             List of competitor data dictionaries
         """
-        return load_latest_data('competitor_analysis_')
+        competitors_dict = load_latest_data('competitors_')
+
+        return competitors_dict['competitors']
 
 def load_competitor_questions() -> List[Dict]:
         """
@@ -45,4 +47,4 @@ def load_competitor_questions() -> List[Dict]:
             List of competitor questions
         """
         # Example competitor questions (replace with actual questions)
-        return load_latest_data('competitor_questions_')
+        return load_latest_data('competitor_questions_')['questions']

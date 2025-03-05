@@ -112,7 +112,17 @@ class ResearchModule:
                 "3. Si la respuesta necesita más información, proporciona una pregunta "
                 "específica para obtener esa información.\n\n"
                 "Responde en formato JSON con las siguientes claves: "
-                "is_complete, missing_info, follow_up_question, enhanced_answer"
+                "is_complete, missing_info, follow_up_question, enhanced_answer\n\n"
+                "Ejemplo de respuesta:\n"
+                "```json\n"
+                "{\n"
+                '  "is_complete": "no",\n'
+                '  "missing_info": "Falta información sobre precios y disponibilidad",\n'
+                '  "follow_up_question": "¿Cuáles son los precios y disponibilidad de estos productos?",\n'
+                '  "enhanced_answer": "La respuesta mejorada con la información actual"\n'
+                "}\n"
+                "```\n"
+                "Si la respuesta es completa, usa 'yes' para is_complete y deja follow_up_question vacío."
             )
         else:
             validation_prompt = (
@@ -123,7 +133,17 @@ class ResearchModule:
                 "3. If the answer needs more information, provide a specific question "
                 "to get that information.\n\n"
                 "Respond in JSON format with the following keys: "
-                "is_complete, missing_info, follow_up_question, enhanced_answer"
+                "is_complete, missing_info, follow_up_question, enhanced_answer\n\n"
+                "Example response:\n"
+                "```json\n"
+                "{\n"
+                '  "is_complete": "no",\n'
+                '  "missing_info": "Missing information about pricing and availability",\n'
+                '  "follow_up_question": "What are the prices and availability of these products?",\n'
+                '  "enhanced_answer": "The enhanced answer with current information"\n'
+                "}\n"
+                "```\n"
+                "If the answer is complete, use 'yes' for is_complete and leave follow_up_question empty."
             )
 
         try:        
@@ -139,18 +159,83 @@ class ResearchModule:
             
             # Clean the response from markdown code blocks before parsing JSON
             content = response.choices[0].message.content
-            # Remove markdown code block delimiters if present
-            if content.startswith('```'):
-                content = content.split('```')[1]  # Get content between ``` marks
-                if content.startswith('json'):
-                    content = content[4:]  # Remove 'json' from the start
-                content = content.strip()  # Remove any extra whitespace
+            logging.info(f"Raw validation response: {content[:200]}...")
             
-            validation_result = json.loads(content)
+            # Extract JSON from the response
+            json_content = self._extract_json_from_text(content)
+            
+            if not json_content:
+                logging.warning("Could not extract valid JSON from validation response")
+                # Return a default response to avoid breaking the flow
+                return {
+                    "is_complete": "no",
+                    "missing_info": "Could not parse validation response",
+                    "follow_up_question": "",
+                    "enhanced_answer": current_answer
+                }
+            
+            validation_result = json.loads(json_content)
+            logging.info(f"Validation result: {validation_result}")
             return validation_result
         
+        except json.JSONDecodeError as e:
+            logging.error(f"JSON parsing error: {str(e)}")
+            # Return a default response to avoid breaking the flow
+            return {
+                "is_complete": "no",
+                "missing_info": f"Error parsing validation response: {str(e)}",
+                "follow_up_question": "",
+                "enhanced_answer": current_answer
+            }
         except Exception as e:
-            raise Exception(f"Error in validation: {str(e)}")
+            logging.error(f"Error in validation: {str(e)}")
+            # Return a default response to avoid breaking the flow
+            return {
+                "is_complete": "no",
+                "missing_info": f"Error during validation: {str(e)}",
+                "follow_up_question": "",
+                "enhanced_answer": current_answer
+            }
+            
+    def _extract_json_from_text(self, text: str) -> str:
+        """
+        Extract JSON from text that might contain markdown or other content.
+        
+        Args:
+            text: Text that might contain JSON
+            
+        Returns:
+            str: Extracted JSON string or empty string if no JSON found
+        """
+        # Try to extract JSON from markdown code blocks
+        if "```json" in text or "```" in text:
+            parts = text.split("```")
+            for i, part in enumerate(parts):
+                if i % 2 == 1:  # This is inside a code block
+                    # Remove 'json' from the start if present
+                    if part.startswith("json"):
+                        part = part[4:].strip()
+                    # Try to parse this part as JSON
+                    try:
+                        json.loads(part)
+                        return part
+                    except:
+                        continue
+        
+        # Try to find JSON between curly braces
+        start_idx = text.find("{")
+        end_idx = text.rfind("}")
+        
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            potential_json = text[start_idx:end_idx+1]
+            try:
+                json.loads(potential_json)
+                return potential_json
+            except:
+                pass
+        
+        # If we couldn't find valid JSON, return empty string
+        return ""
 
     async def research(self, question: str) -> str:
         """
@@ -163,40 +248,64 @@ class ResearchModule:
             str: The final, validated answer
         """
         logging.info(f"Starting research for question: {question[:100]} ....")
-        current_answer = await self.search_with_perplexity(question)
-        iterations = 0
-        
-        while iterations < self.config.max_iterations:
-            validation_result = await self.validate_with_llm(
-                question, 
-                current_answer
-            )
+        try:
+            current_answer = await self.search_with_perplexity(question)
+            iterations = 0
             
-            if validation_result["is_complete"] == "yes":
-                return current_answer
+            while iterations < self.config.max_iterations:
+                logging.info(f"Research iteration {iterations + 1}/{self.config.max_iterations}")
                 
-            if not validation_result.get("follow_up_question"):
-                # If no follow-up question but answer isn't complete,
-                # return the enhanced answer
-                return validation_result.get("enhanced_answer", current_answer)
+                try:
+                    validation_result = await self.validate_with_llm(
+                        question, 
+                        current_answer
+                    )
+                    
+                    # Ensure validation_result has the expected keys
+                    if not isinstance(validation_result, dict):
+                        logging.warning(f"Validation result is not a dictionary: {validation_result}")
+                        break
+                        
+                    # Check if the answer is complete
+                    is_complete = validation_result.get("is_complete", "").lower()
+                    if is_complete == "yes":
+                        logging.info("Answer is complete, ending research")
+                        return current_answer
+                        
+                    # Check if we have a follow-up question
+                    follow_up_question = validation_result.get("follow_up_question")
+                    if not follow_up_question:
+                        logging.info("No follow-up question, returning enhanced answer")
+                        return validation_result.get("enhanced_answer", current_answer)
+                    
+                    logging.info(f"Follow-up question: {follow_up_question[:100]}...")
+                    
+                    # Get additional information
+                    additional_info = await self.search_with_perplexity(follow_up_question)
+                    
+                    # Combine the answers
+                    if self.config.language == "es":
+                        current_answer = (f"{current_answer}\n\nInformación adicional: "
+                                        f"{additional_info}")
+                    else:
+                        current_answer = (f"{current_answer}\n\nAdditional information: "
+                                        f"{additional_info}")
                 
-            # Get additional information
-            additional_info = await self.search_with_perplexity(
-                validation_result["follow_up_question"]
-            )
+                except Exception as e:
+                    logging.error(f"Error in research iteration: {str(e)}")
+                    # If there's an error, we'll still increment iterations to avoid infinite loop
+                
+                # Always increment iterations to prevent infinite loop
+                iterations += 1
+                logging.info(f"Completed iteration {iterations}/{self.config.max_iterations}")
             
-            # Combine the answers
-            if self.config.language == "es":
-                current_answer = (f"{current_answer}\n\nInformación adicional: "
-                                f"{additional_info}")
-            else:
-                current_answer = (f"{current_answer}\n\nAdditional information: "
-                                f"{additional_info}")
+            logging.info(f"Reached maximum iterations ({self.config.max_iterations}), returning best answer")
+            return current_answer
             
-            iterations += 1
-        
-        # If we've reached max iterations, return the best answer we have
-        return current_answer
+        except Exception as e:
+            logging.error(f"Critical error in research: {str(e)}")
+            # Return a meaningful error message instead of empty string
+            return f"Error during research: {str(e)}"
 
 # Example usage
 async def main():

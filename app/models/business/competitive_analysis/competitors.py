@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, ForeignKey
+from sqlalchemy import Column, String, Text, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from app.models.base import Base, generate_uuid
 
@@ -19,3 +19,6 @@ class Competitor(Base):
     linkedin_url = Column(String)
     x_url = Column(String)  # Twitter/X
     youtube_url = Column(String)
+    tiktok_url = Column(String)
+
+    similarity_score = Column(Float)

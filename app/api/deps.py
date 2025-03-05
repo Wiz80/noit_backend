@@ -9,6 +9,7 @@ from app.db.session import SessionLocal
 from app.models.user import User
 from app.core import security
 from app.crud.crud_user import CRUDUser
+from app.services.storage.minio_service import MinioService
 
 crud_user = CRUDUser(User)
 
@@ -47,3 +48,9 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+def get_minio_client() -> MinioService:
+    """
+    Returns a MinioService instance for handling object storage operations.
+    """
+    return MinioService(bucket_name="lattice-businesses")

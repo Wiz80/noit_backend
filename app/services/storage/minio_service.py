@@ -58,6 +58,9 @@ class MinioService:
             data: The content to upload (can be bytes or string)
             content_type: The MIME type of the content
             metadata: Optional metadata dictionary to attach to the object
+            
+        Returns:
+            bool: True if the upload was successful
         """
         try:
             # Convert string to bytes if necessary
@@ -73,6 +76,7 @@ class MinioService:
                 metadata=metadata
             )
             logger.info(f"Content uploaded successfully to '{object_name}'")
+            return True
         except S3Error as e:
             logger.error(f"Error uploading content to '{object_name}': {e}")
             raise
@@ -112,10 +116,10 @@ class MinioService:
 
     def list_objects(self, prefix: str = "") -> list:
         try:
-            objects = self.client.list_objects(self.bucket_name, prefix=prefix, recursive=True)
-            object_list = [obj.object_name for obj in objects]
-            logger.info(f"Listed {len(object_list)} objects with prefix '{prefix}'.")
-            return object_list
+            objects = list(self.client.list_objects(self.bucket_name, prefix=prefix, recursive=True))
+            object_names = [obj.object_name for obj in objects]
+            logger.info(f"Listed {len(object_names)} objects with prefix '{prefix}'.")
+            return object_names
         except S3Error as e:
             logger.error(f"Error listing objects with prefix '{prefix}': {e}")
             raise
@@ -135,7 +139,12 @@ class MinioService:
     def download_json(self, object_name: str, default_value=None) -> dict:
         try:
             data = self.get_object_data(object_name)
-            return json.loads(data.decode('utf-8'))
+            try:
+                # Intento principal: decodificar como UTF-8
+                return json.loads(data.decode('utf-8'))
+            except UnicodeDecodeError:
+                # Si falla, intentar decodificar como latin-1, que es más permisivo
+                return json.loads(data.decode('latin-1'))
         except S3Error as e:
             if e.code == 'NoSuchKey' and default_value is not None:
                 logger.info(f"JSON object '{object_name}' not found. Returning default value.")

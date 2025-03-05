@@ -50,12 +50,12 @@ BUSINESS_MODEL_TRANSLATIONS = {
 class BusinessCanvasModule(BaseBusinessModule):
     """Module for analyzing and documenting the business model"""
 
-    def __init__(self, config, business_id: str, db):
+    def __init__(self, config, business_id: str, db, update_mode: bool = False, existing_canvas: BusinessCanvas = None):
         super().__init__(config, BUSINESS_MODEL_TRANSLATIONS)
         self.business_id = business_id
         self.db = db
-        self.update_mode = False
-        self.existing_canvas = None
+        self.update_mode = update_mode
+        self.existing_canvas = existing_canvas
     
     async def run(self):
         """Execute the business model analysis process"""

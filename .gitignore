@@ -6,6 +6,6 @@ __pycache__
 
 .DS_Store
 
-*.md
-
 *.json
+
+.cursorrules

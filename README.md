@@ -182,7 +182,7 @@ python manage.py runserver
 - **Backend Framework**: FastAPI
 - **Database**: PostgreSQL with SQLAlchemy ORM
 - **Object Storage**: MinIO
-- **AI Integration**: OpenAI, Perplexity API
+- **AI Integration**: OpenAI, n8n workflow for web research
 - **Authentication**: JWT with Python-Jose
 - **Containerization**: Docker and Docker Compose
 - **CLI Management**: Click

@@ -142,7 +142,9 @@ class InstagramComment(Base):
     post_id = Column(String, ForeignKey("instagram_posts_info.id", ondelete="CASCADE"), nullable=False)
     username_commentator = Column(String(50), nullable=False)
     comment_text = Column(Text, nullable=False)
+    category_id = Column(String, ForeignKey("instagram_comment_categories.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.now(UTC))
+    updated_at = Column(DateTime(timezone=True), default=datetime.now(UTC), onupdate=datetime.now(UTC))
 
 
 class InstagramLDATopic(Base):

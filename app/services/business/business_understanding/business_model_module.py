@@ -58,7 +58,6 @@ class BaseModule(ABC):
         self.config = config
         self.results = {"en": {}, "es": {}}
         self.doc_sections = {"en": [], "es": []}
-        self.research_module = ResearchModule(config)
         
     def get_translation(self, key: str) -> str:
         """Get translated text based on current language"""

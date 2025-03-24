@@ -1,8 +1,8 @@
-"""initial tables
+"""add tables
 
-Revision ID: 642cbc19a411
+Revision ID: 544f344549ff
 Revises: 
-Create Date: 2025-03-02 21:59:57.875825
+Create Date: 2025-03-21 11:24:26.706661
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '642cbc19a411'
+revision: str = '544f344549ff'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -238,8 +238,10 @@ def upgrade() -> None:
     sa.Column('post_id', sa.String(), nullable=False),
     sa.Column('username_commentator', sa.String(length=50), nullable=False),
     sa.Column('comment_text', sa.Text(), nullable=False),
+    sa.Column('category_id', sa.String(), nullable=True),
     sa.Column('created_at', sa.DateTime(timezone=True), nullable=True),
-    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
+    sa.ForeignKeyConstraint(['category_id'], ['instagram_comment_categories.id'], ondelete='SET NULL'),
     sa.ForeignKeyConstraint(['post_id'], ['instagram_posts_info.id'], ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['user_id'], ['instagram_user_info.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')

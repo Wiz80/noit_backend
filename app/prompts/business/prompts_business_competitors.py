@@ -209,7 +209,8 @@ def create_research_query(lang, business_details, prompt_search: str) -> str:
         1. Listar máximo 20 competidores
         2. Usar SIEMPRE keys en inglés
         3. Valores pueden ser en español
-        4. Formato JSON:
+        4. Incluir TODAS las redes sociales disponibles
+        5. Formato JSON:
 
         {
         "competitors": [
@@ -217,10 +218,21 @@ def create_research_query(lang, business_details, prompt_search: str) -> str:
             "full_name": "string", # Nombre Completo del Competidor
             "key_feature": "string", # Característica principal/clave del competidor (Propuesta de valor)
             "website": "url", # URL del sitio web
+            "instagram_url": "handle", # Usuario de Instagram (si está disponible)
+            "facebook_url": "handle", # Usuario de Facebook (si está disponible)
+            "linkedin_url": "handle", # URL de LinkedIn (si está disponible)
+            "x_url": "handle", # Usuario de Twitter/X (si está disponible)
+            "youtube_url": "handle", # Canal de YouTube (si está disponible)
+            "tiktok_url": "handle", # Usuario de TikTok (si está disponible)
             "similarity_score": 1-100 # Porcentaje de similitud con la idea de negocio
             }
             ]
         }
+
+        Para cada competidor, por favor investiga y proporciona:
+        - La URL exacta del sitio web verificada
+        - Enlaces a TODAS las redes sociales disponibles
+        - Una puntuación de similitud precisa entre 1-100
 
         Evita incluir comentarios adicionales en el JSON de salida.
         """
@@ -236,17 +248,29 @@ def create_research_query(lang, business_details, prompt_search: str) -> str:
         Requirements:
         1. List top 20 competitors
         2. Use English keys
-        3. JSON Format:
+        3. Include ALL available social media
+        4. JSON Format:
         {
             "competitors": [
                 {
                 "full_name": "string", # Competitor's Full Name
                 "key_feature": "string", # Competitor's Key Feature (Value Proposition)
                 "website": "url", # Competitor's Website URL
+                "instagram_url": "handle", # Instagram handle (if available)
+                "facebook_url": "handle", # Facebook handle (if available)
+                "linkedin_url": "handle", # LinkedIn URL (if available)
+                "x_url": "handle", # Twitter/X handle (if available)
+                "youtube_url": "handle", # YouTube channel (if available)
+                "tiktok_url": "handle", # TikTok handle (if available)
                 "similarity_score": 1-100 # Similarity score with the business idea
                 }
             ]
         }
+
+        For each competitor, please research and provide:
+        - The exact verified website URL
+        - Links to ALL available social media
+        - An accurate similarity score between 1-100
 
         Avoid adding extra comments in the output JSON.
         """
@@ -258,7 +282,7 @@ def create_analysis_prompt(lang, business_model) -> str:
         return f"""
         Eres un investigador doctoral (PhD) especializado en Marketing y Administración de Empresas.
         La tarea consiste en generar un conjunto de preguntas e indicaciones que guíen la
-        elaboración de un “análisis de competencia”.
+        elaboración de un "análisis de competencia".
 
         Las preguntas las vas a hacer con el objetivo de evaluar a un competidor directo de la empresa
 

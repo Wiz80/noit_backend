@@ -12,14 +12,12 @@ class BaseValidatorConfig:
     """Base configuration class for validation modules"""
     def __init__(self,
                  business_idea: str,  # Nuevo parámetro
-                 perplexity_api_key: str,
                  validator_api_keys: Dict[str, str],
                  validator_provider: str = "deepseek",
                  validator_model: str = "deepseek-reasoner",
                  language: str = "en"):
         
         self.business_idea = business_idea  
-        self.perplexity_api_key = perplexity_api_key
         self.validator_api_keys = validator_api_keys
         self.validator_provider = validator_provider
         self.validator_model = validator_model
@@ -46,14 +44,6 @@ class BaseBusinessModule(ABC):
         self.results = {"en": {}, "es": {}}
         self.doc_sections = {"en": [], "es": []}
         self.TRANSLATIONS = TRANSLATIONS
-        self.research_module = ResearchModule(
-            ResearchConfig(
-                perplexity_api_key=config.perplexity_api_key,
-                validator_api_keys=config.validator_api_keys,
-                validator_model=config.validator_model,
-                language=config.language
-            )
-        )
 
     def get_translation(self, key: str) -> str:
         """Get translated text based on current language"""

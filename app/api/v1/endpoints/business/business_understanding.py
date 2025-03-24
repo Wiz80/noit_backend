@@ -192,7 +192,6 @@ async def create_business_canvas(
         # Configure and run the business model analysis
         config = BaseValidatorConfig(
             business_idea=business_idea_text,
-            perplexity_api_key=os.getenv("PERPLEXITY_API_KEY"),
             validator_api_keys={"openai": os.getenv("OPENAI_API_KEY")},
             validator_provider="openai",
             validator_model="openai:gpt-4o",

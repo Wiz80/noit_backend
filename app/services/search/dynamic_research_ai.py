@@ -1,333 +1,209 @@
-from typing import Dict
-import json
-from openai import OpenAI
-import aisuite as ai
-from dataclasses import dataclass
-import time
-from dataclasses import dataclass
 import os
-from dotenv import load_dotenv  
+import json
 import logging
+import uuid
+import requests
+import base64
+from dataclasses import dataclass
+from typing import Dict, Optional, List, Any, Union
 
-logging.basicConfig(level=logging.INFO)
-
+from dotenv import load_dotenv
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ResearchConfig:
-    """Configuration class for the research module"""
-    perplexity_api_key: str
-    validator_api_keys: Dict[str, str]
-    validator_model: str
-    language: str = "en"  # "en" for English, "es" for Spanish
-    max_iterations: int = 3
-    temperature: float = 0.7
+    """Configuration for the research module"""
+    model: str  # Can be "sonar", "mistral", etc. for Perplexity models
+    language: str = "en"
+    max_iterations: int = 1
 
 class ResearchModule:
     """
-    A module that combines Perplexity for web search and DeepSeek for validation
-    and completion of research questions.
+    Module for conducting web research using n8n webhook
+    
+    This module replaces the previous implementation that used direct API calls
+    with a version that uses an n8n workflow via webhook.
     """
     
-    def __init__(self, config: ResearchConfig, model_validator: str = "openai"):
-        """
-        Initialize the research module with API clients and configuration.
-        
-        Args:
-            config: ResearchConfig object containing API keys and settings
-        """
+    def __init__(self, config: ResearchConfig):
         self.config = config
-        self.perplexity_client = OpenAI(
-            api_key=config.perplexity_api_key,
-            base_url="https://api.perplexity.ai"
-        )
+        self.language = config.language
+        # Debug the environment variable value
+        webhook_url_from_env = os.getenv("N8N_WEBHOOK_URL")
+        logger.info(f"N8N_WEBHOOK_URL from environment: {webhook_url_from_env}")
         
-        if model_validator == "openai" or model_validator == "claude":
-            self.validator_client = ai.Client()
-        elif model_validator == "deepseek":
-            self.validator_client = OpenAI(api_key=config.validator_api_keys["deepseek"],
-                                           base_url="https://api.deepseek.com")
+        self.n8n_webhook_url = os.getenv("N8N_WEBHOOK_URL", "https://masterchief.app.n8n.cloud/webhook-test/b1cc2ce8-d4c9-44ff-b56f-0f0b86b62d04")
+        self.n8n_auth_header = os.getenv("N8N_AUTH_HEADER", "auth_user")
         
-    def get_system_prompt(self, is_validation: bool = False) -> str:
-        """Get the appropriate system prompt based on language and purpose"""
-        if self.config.language == "es":
-            if is_validation:
-                return ("Eres un asistente de investigación experto. Tu tarea es validar y "
-                       "complementar respuestas de investigación, asegurando que sean completas "
-                       "y precisas. Si falta información importante, debes identificarla.")
-            return ("Eres un asistente de investigación experto. Proporciona respuestas "
-                   "detalladas y precisas basadas en información actual de la web.")
-        else:
-            if is_validation:
-                return ("You are an expert research assistant. Your task is to validate and "
-                       "complement research answers, ensuring they are complete and accurate. "
-                       "If important information is missing, you should identify it.")
-            return ("You are an expert research assistant. Provide detailed and accurate "
-                   "answers based on current web information.")
-
-    async def search_with_perplexity(self, question: str) -> str:
+        # Get timeout from environment or use default value
+        self.webhook_timeout = int(os.getenv("N8N_WEBHOOK_TIMEOUT", "60"))
+        logger.info(f"Using webhook timeout: {self.webhook_timeout} seconds")
+        
+        # Log the final URL being used
+        logger.info(f"Using n8n webhook URL: {self.n8n_webhook_url}")
+        
+        # Verificar que las configuraciones clave estén presentes
+        if not self.n8n_webhook_url:
+            logger.warning("N8N_WEBHOOK_URL no está configurada, usando URL por defecto")
+        
+        if not self.n8n_auth_header:
+            logger.warning("N8N_AUTH_HEADER no está configurada, usando valor por defecto")
+            
+    async def research(self, query: str) -> str:
         """
-        Perform a web search using Perplexity API.
+        Perform web research on the given query
         
         Args:
-            question: The research question to be answered
+            query: The research query
             
         Returns:
-            str: The answer from Perplexity
+            A string containing the research results
         """
         try:
-            response = self.perplexity_client.chat.completions.create(
-                model="sonar-pro",
-                messages=[
-                    {"role": "system", "content": self.get_system_prompt()},
-                    {"role": "user", "content": question}
-                ],
-                temperature=self.config.temperature
-            )
-            return response.choices[0].message.content
+            logger.info(f"Starting research on query: {query[:50]}...")
+            
+            # Instead of awaiting the result, just make the HTTP call to n8n
+            # This doesn't need to be awaited since we're using requests directly
+            # and we only care about initiating the request, not the final research result
+            # n8n will call our callback URL when it's done
+            result = self._call_n8n_webhook(query)
+            
+            # Just return the request ID or a status message
+            return result.get("request_id", "Research request submitted")
+            
         except Exception as e:
-            raise Exception(f"Error in Perplexity search: {str(e)}")
-
-    async def validate_with_llm(
-        self, 
-        original_question: str, 
-        current_answer: str
-    ) -> Dict[str, any]:
+            logger.error(f"Research error: {str(e)}")
+            return f"Error starting research: {str(e)}"
+    
+    async def search_and_answer(self, query: str) -> Dict[str, Any]:
         """
-        Validate and potentially enhance the answer using DeepSeek, openai or claude.
+        Perform web research and return both the answer and sources
         
         Args:
-            original_question: The original research question
-            current_answer: The current answer to validate
+            query: The research query
             
         Returns:
-            Dict containing validation results and any follow-up questions
+            Dict containing a message about the request and empty sources
         """
-        if self.config.language == "es":
-            validation_prompt = (
-                f"Pregunta original: {original_question}\n\n"
-                f"Respuesta actual: {current_answer}\n\n"
-                "1. ¿La respuesta es completa y precisa? (responde con 'yes' o 'no')\n"
-                "2. ¿Qué información importante falta, si es que falta alguna?\n"
-                "3. Si la respuesta necesita más información, proporciona una pregunta "
-                "específica para obtener esa información.\n\n"
-                "Responde en formato JSON con las siguientes claves: "
-                "is_complete, missing_info, follow_up_question, enhanced_answer\n\n"
-                "Ejemplo de respuesta:\n"
-                "```json\n"
-                "{\n"
-                '  "is_complete": "no",\n'
-                '  "missing_info": "Falta información sobre precios y disponibilidad",\n'
-                '  "follow_up_question": "¿Cuáles son los precios y disponibilidad de estos productos?",\n'
-                '  "enhanced_answer": "La respuesta mejorada con la información actual"\n'
-                "}\n"
-                "```\n"
-                "Si la respuesta es completa, usa 'yes' para is_complete y deja follow_up_question vacío."
-            )
-        else:
-            validation_prompt = (
-                f"Original question: {original_question}\n\n"
-                f"Current answer: {current_answer}\n\n"
-                "1. Is the answer complete and accurate? (respond with 'yes' or 'no')\n"
-                "2. What important information is missing, if any?\n"
-                "3. If the answer needs more information, provide a specific question "
-                "to get that information.\n\n"
-                "Respond in JSON format with the following keys: "
-                "is_complete, missing_info, follow_up_question, enhanced_answer\n\n"
-                "Example response:\n"
-                "```json\n"
-                "{\n"
-                '  "is_complete": "no",\n'
-                '  "missing_info": "Missing information about pricing and availability",\n'
-                '  "follow_up_question": "What are the prices and availability of these products?",\n'
-                '  "enhanced_answer": "The enhanced answer with current information"\n'
-                "}\n"
-                "```\n"
-                "If the answer is complete, use 'yes' for is_complete and leave follow_up_question empty."
-            )
-
-        try:        
-            logging.info("Validating answer...")
-            response = self.validator_client.chat.completions.create(
-                model= self.config.validator_model, #"deepseek-reasoner",
-                messages=[
-                    {"role": "system", "content": self.get_system_prompt(is_validation=True)},
-                    {"role": "user", "content": validation_prompt}
-                ],
-                temperature=0.3
-            )
-            
-            # Clean the response from markdown code blocks before parsing JSON
-            content = response.choices[0].message.content
-            logging.info(f"Raw validation response: {content[:200]}...")
-            
-            # Extract JSON from the response
-            json_content = self._extract_json_from_text(content)
-            
-            if not json_content:
-                logging.warning("Could not extract valid JSON from validation response")
-                # Return a default response to avoid breaking the flow
-                return {
-                    "is_complete": "no",
-                    "missing_info": "Could not parse validation response",
-                    "follow_up_question": "",
-                    "enhanced_answer": current_answer
-                }
-            
-            validation_result = json.loads(json_content)
-            logging.info(f"Validation result: {validation_result}")
-            return validation_result
-        
-        except json.JSONDecodeError as e:
-            logging.error(f"JSON parsing error: {str(e)}")
-            # Return a default response to avoid breaking the flow
-            return {
-                "is_complete": "no",
-                "missing_info": f"Error parsing validation response: {str(e)}",
-                "follow_up_question": "",
-                "enhanced_answer": current_answer
-            }
-        except Exception as e:
-            logging.error(f"Error in validation: {str(e)}")
-            # Return a default response to avoid breaking the flow
-            return {
-                "is_complete": "no",
-                "missing_info": f"Error during validation: {str(e)}",
-                "follow_up_question": "",
-                "enhanced_answer": current_answer
-            }
-            
-    def _extract_json_from_text(self, text: str) -> str:
-        """
-        Extract JSON from text that might contain markdown or other content.
-        
-        Args:
-            text: Text that might contain JSON
-            
-        Returns:
-            str: Extracted JSON string or empty string if no JSON found
-        """
-        # Try to extract JSON from markdown code blocks
-        if "```json" in text or "```" in text:
-            parts = text.split("```")
-            for i, part in enumerate(parts):
-                if i % 2 == 1:  # This is inside a code block
-                    # Remove 'json' from the start if present
-                    if part.startswith("json"):
-                        part = part[4:].strip()
-                    # Try to parse this part as JSON
-                    try:
-                        json.loads(part)
-                        return part
-                    except:
-                        continue
-        
-        # Try to find JSON between curly braces
-        start_idx = text.find("{")
-        end_idx = text.rfind("}")
-        
-        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-            potential_json = text[start_idx:end_idx+1]
-            try:
-                json.loads(potential_json)
-                return potential_json
-            except:
-                pass
-        
-        # If we couldn't find valid JSON, return empty string
-        return ""
-
-    async def research(self, question: str) -> str:
-        """
-        Main research function that coordinates the research process.
-        
-        Args:
-            question: The research question to be answered
-            
-        Returns:
-            str: The final, validated answer
-        """
-        logging.info(f"Starting research for question: {question[:100]} ....")
         try:
-            current_answer = await self.search_with_perplexity(question)
-            iterations = 0
+            response = self._call_n8n_webhook(query)
+            return {
+                "answer": response['text'],
+                "sources": response.get('citations', []),
+                "request_id": response.get('request_id')
+            }
+        except Exception as e:
+            logger.error(f"search_and_answer failed: {str(e)}")
+            return {
+                "answer": f"Error during research: {str(e)}",
+                "sources": []
+            }
+    
+    def _call_n8n_webhook(self, research_query: str) -> Dict[str, Any]:
+        """
+        Call the n8n webhook to perform the research
+        
+        Args:
+            research_query: The query to research (can contain callback URL as JSON)
             
-            while iterations < self.config.max_iterations:
-                logging.info(f"Research iteration {iterations + 1}/{self.config.max_iterations}")
+        Returns:
+            Dict containing the research results
+        """
+        # Debug: Log the webhook URL before making the request
+        logger.info(f"Webhook URL before request: {self.n8n_webhook_url}")
+        
+        headers = {
+            "Authorization": f"Basic {self.n8n_auth_header}",
+            "Content-Type": "application/json"
+        }
+        
+        # Check if research_query is a JSON string containing callback info
+        try:
+            query_data = json.loads(research_query)
+            # Extract the actual search query and callback info
+            search_query = query_data.get("search_query", research_query)
+            callback_url = query_data.get("callback_url")
+            request_id = query_data.get("request_id")
+            business_id = query_data.get("business_id")
+            
+            # Prepare data payload with callback info if available
+            data = {
+                "id": request_id or str(uuid.uuid4()),
+                "lang": self.language,
+                "answer": "api",
+                "research": search_query,
+                "require_validation": "true",
+                "model": self.config.model
+            }
+            
+            # Include callback information if available
+            if callback_url:
+                data["callback_url"] = callback_url
+                data["request_id"] = request_id
+                data["business_id"] = business_id
+                logger.info(f"Including callback URL in request: {callback_url}")
+            
+        except (json.JSONDecodeError, TypeError):
+            # If not JSON, use the query directly
+            data = {
+                "id": str(uuid.uuid4()),
+                "lang": self.language,
+                "answer": "api",
+                "research": research_query,
+                "require_validation": "true",
+                "model": self.config.model
+            }
                 
+        logger.info(f"Calling n8n webhook with data: {json.dumps(data)[:200]}...")
+        
+        try:
+            # Debug: Log the exact URL being used in the request
+            request_url = self.n8n_webhook_url
+            logger.info(f"Making request to URL: {request_url}")
+            
+            # Start a thread to make the request in the background
+            # This way we don't block the main thread waiting for the response
+            import threading
+            
+            def make_request():
                 try:
-                    validation_result = await self.validate_with_llm(
-                        question, 
-                        current_answer
+                    response = requests.post(
+                        request_url,
+                        headers=headers,
+                        json=data,
+                        timeout=self.webhook_timeout
                     )
-                    
-                    # Ensure validation_result has the expected keys
-                    if not isinstance(validation_result, dict):
-                        logging.warning(f"Validation result is not a dictionary: {validation_result}")
-                        break
-                        
-                    # Check if the answer is complete
-                    is_complete = validation_result.get("is_complete", "").lower()
-                    if is_complete == "yes":
-                        logging.info("Answer is complete, ending research")
-                        return current_answer
-                        
-                    # Check if we have a follow-up question
-                    follow_up_question = validation_result.get("follow_up_question")
-                    if not follow_up_question:
-                        logging.info("No follow-up question, returning enhanced answer")
-                        return validation_result.get("enhanced_answer", current_answer)
-                    
-                    logging.info(f"Follow-up question: {follow_up_question[:100]}...")
-                    
-                    # Get additional information
-                    additional_info = await self.search_with_perplexity(follow_up_question)
-                    
-                    # Combine the answers
-                    if self.config.language == "es":
-                        current_answer = (f"{current_answer}\n\nInformación adicional: "
-                                        f"{additional_info}")
-                    else:
-                        current_answer = (f"{current_answer}\n\nAdditional information: "
-                                        f"{additional_info}")
-                
-                except Exception as e:
-                    logging.error(f"Error in research iteration: {str(e)}")
-                    # If there's an error, we'll still increment iterations to avoid infinite loop
-                
-                # Always increment iterations to prevent infinite loop
-                iterations += 1
-                logging.info(f"Completed iteration {iterations}/{self.config.max_iterations}")
+                    # Log response status
+                    logger.info(f"Background request completed with status: {response.status_code}")
+                    return response
+                except Exception as req_error:
+                    logger.error(f"Background request error: {str(req_error)}")
+                    return None
             
-            logging.info(f"Reached maximum iterations ({self.config.max_iterations}), returning best answer")
-            return current_answer
+            # Start the request in a background thread and continue immediately
+            thread = threading.Thread(target=make_request)
+            thread.daemon = True  # Make thread a daemon so it doesn't block program exit
+            thread.start()
+            
+            logger.info(f"Request initiated in background thread for ID: {data['id']}")
+            
+            # Return immediately with just the request ID
+            return {
+                "text": f"Research request submitted with ID: {data['id']}. Processing asynchronously.",
+                "citations": [],
+                "request_id": data['id']
+            }
             
         except Exception as e:
-            logging.error(f"Critical error in research: {str(e)}")
-            # Return a meaningful error message instead of empty string
-            return f"Error during research: {str(e)}"
-
-# Example usage
-async def main():
-
-    config = ResearchConfig(
-        perplexity_api_key=os.getenv("PERPLEXITY_API_KEY"),
-        validator_api_keys={"openai": os.getenv("OPENAI_API_KEY")},
-        validator_model="openai:gpt-4o-mini",
-        language="en",  # or "es" for Spanish
-        max_iterations=3,
-        temperature=0.7
-    )
-    
-    research_module = ResearchModule(config, model_validator="openai")
-    
-    question = "What are the latest developments in quantum computing?"
-    try:
-        final_answer = await research_module.research(question)
-        print(f"Final Answer:\n{final_answer}")
-    except Exception as e:
-        print(f"Error during research: {str(e)}")
-
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+            logger.error(f"Error setting up n8n webhook call: {str(e)}")
+            # Provide a meaningful error response
+            return {
+                "text": f"Error initiating research request: {str(e)}",
+                "citations": [],
+                "request_id": data.get('id', str(uuid.uuid4())),
+                "error": str(e)
+            } 

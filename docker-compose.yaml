@@ -11,6 +11,14 @@ services:
     ports:
       - "5435:5432"
 
+  redis:
+    image: redis:6.2-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+
   minio:
     image: minio/minio
     ports:
@@ -26,3 +34,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  redis_data:

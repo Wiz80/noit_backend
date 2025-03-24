@@ -22,6 +22,7 @@ Lattice addresses these challenges by providing AI-driven guidance and tools tha
 - **Competitor Analysis**: Research and analyze competitors in your market
 - **State of Art Analysis**: Understand the current market landscape (in development)
 - **Social Media Competitor Analysis**: Analyze competitors' Instagram profiles and content
+- **Interactive Business Validation Chat**: Engage in a conversational process to validate your business idea through a structured methodology
 
 ## Architecture
 
@@ -30,6 +31,7 @@ Lattice is built using FastAPI for the backend, with a modular architecture that
 - Business logic services
 - Data models
 - Storage services (MinIO for object storage)
+- Cache services (Redis for conversation management)
 
 ## Installation
 
@@ -38,6 +40,7 @@ Lattice is built using FastAPI for the backend, with a modular architecture that
 - Python 3.8+
 - Docker and Docker Compose
 - MinIO (for object storage)
+- Redis (for chat cache)
 - PostgreSQL
 
 ### Setup
@@ -65,6 +68,7 @@ cp .env.example .env
 # Edit .env with your configuration including:
 # - Database credentials
 # - MinIO credentials
+# - Redis configuration
 # - API keys for OpenAI and Perplexity
 # - JWT secret key
 # - Apify API key for Instagram scraping
@@ -168,6 +172,36 @@ python manage.py runserver
 - **Description**: Retrieves the progress of an Instagram competitor analysis task
 - **Response**: Returns progress percentage, status, and results
 
+### Business Chat
+
+#### Start or Continue Chat Session
+- **Endpoint**: `POST /api/v1/business-idea/{business_idea_id}/chat/start`
+- **Description**: Starts a new chat session or continues an existing one for business idea validation
+- **Parameters**:
+  - `llm_provider` (optional): LLM provider to use (default: "openai")
+  - `llm_model` (optional): LLM model to use (default: "gpt-4o")
+  - `language` (optional): Language for the conversation (default: "es")
+- **Response**: Returns session information with greeting and first question
+
+#### Send Chat Message
+- **Endpoint**: `POST /api/v1/business-idea/{business_idea_id}/chat/{session_id}/message`
+- **Description**: Sends a message to the chat and receives an AI-generated response
+- **Required Body**: `{"message": "Your message here"}`
+- **Parameters**:
+  - `llm_provider` (optional): LLM provider to use (default: "openai")
+  - `llm_model` (optional): LLM model to use (default: "gpt-4o")
+  - `language` (optional): Language for the conversation (default: "es")
+- **Response**: Returns AI response, next question if applicable, and current status
+
+#### Generate Chat Summary
+- **Endpoint**: `POST /api/v1/business-idea/{business_idea_id}/chat/{session_id}/summary`
+- **Description**: Generates a comprehensive summary of the business validation chat session
+- **Parameters**:
+  - `llm_provider` (optional): LLM provider to use (default: "openai")
+  - `llm_model` (optional): LLM model to use (default: "gpt-4o")
+  - `language` (optional): Language for the summary (default: "es")
+- **Response**: Returns a structured summary of the business validation process
+
 ## Data Flow
 
 1. User creates a business idea with title, mission, vision, and description
@@ -176,13 +210,46 @@ python manage.py runserver
 4. Competitor analysis is performed to understand the market landscape
 5. Instagram competitor analysis extracts data from competitors' social media profiles
 6. Results are stored in MinIO for future reference and retrieval
+7. For interactive validation, users engage in a structured chat conversation with AI
+8. Chat history is cached in Redis to maintain conversation context
+9. The AI guides users through a 3-stage validation process:
+   - Business Understanding
+   - Communication Needs
+   - Communication Strategy
+
+## Business Validation Chat Flow
+
+The Business Validation Chat provides a structured, conversational approach to validating business ideas through three stages:
+
+### Stage 1: Business Understanding
+- Purpose and mission of the business
+- Value proposition
+- Products/services and target audience
+- Ideal customer profile
+- Problem being solved
+- Competitive differentiators
+- Key challenges and opportunities
+
+### Stage 2: Communication Needs
+- Market context necessitating communication
+- Concrete business opportunity
+- Communication objectives (positioning, launch, awareness, conversion)
+
+### Stage 3: Communication Strategy
+- Core message
+- Target audience and their characteristics
+- Credibility factors and tone
+- Success metrics and expected results
+- Desired audience response
+- Constraints and considerations
 
 ## Technologies Used
 
 - **Backend Framework**: FastAPI
 - **Database**: PostgreSQL with SQLAlchemy ORM
 - **Object Storage**: MinIO
-- **AI Integration**: OpenAI, n8n workflow for web research
+- **Cache System**: Redis
+- **AI Integration**: OpenAI, Claude, DeepSeek, n8n workflow for web research
 - **Authentication**: JWT with Python-Jose
 - **Containerization**: Docker and Docker Compose
 - **CLI Management**: Click
@@ -210,6 +277,7 @@ lattice/
 │   ├── schemas/          # Pydantic schemas
 │   ├── services/         # Business logic services
 │   │   ├── business/     # Business-related services
+│   │   ├── cache/        # Cache services (Redis)
 │   │   └── storage/      # Storage services (MinIO)
 │   └── utils/            # Utility functions
 ├── alembic/              # Database migrations
@@ -274,6 +342,21 @@ To run this test script, you need:
 - Database connection with Instagram user and post data
 - A working internet connection
 
+### Business Chat Test
+
+To test the business chat functionality, you can use the following script:
+
+```bash
+# Test the business chat with a specific business idea ID
+python scripts/test_business_chat.py <business_id>
+```
+
+This script:
+- Initializes a chat session for the specified business idea
+- Simulates a conversation with predefined responses
+- Tests the progression through all stages of the validation process
+- Generates and displays a summary of the validation
+
 ## Environment Variables
 
 The application requires the following environment variables:
@@ -296,10 +379,17 @@ MINIO_ROOT_PASSWORD=minioadmin
 MINIO_ENDPOINT=localhost:9000
 MINIO_REGION=us-east-1
 
+# Redis
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+REDIS_DB=0
+
 # API Keys
 OPENAI_API_KEY=your-openai-api-key
 PERPLEXITY_API_KEY=your-perplexity-api-key
 APIFY_API_KEY=your-apify-api-key
+DEEPSEEK_API_KEY=your-deepseek-api-key
 ```
 
 ## License

@@ -1,0 +1,12 @@
+triggers:
+  - name: instagram_research_api_trigger
+    pipeline_uuid: instagram_research_pipeline
+    schedule_type: api
+    schedule_interval: once
+    start_time: "2023-01-01T00:00:00Z"
+    status: active
+    settings:
+      api_key_authentication: true
+    sla:
+      max_retry_count: 3
+      max_retry_seconds: 60 

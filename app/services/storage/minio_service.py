@@ -4,6 +4,7 @@ from io import BytesIO
 from minio import Minio
 from minio.error import S3Error
 import logging
+import asyncio
 from app.core.config import settings
 
 # Configure logging
@@ -11,29 +12,34 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class MinioService:
+    # Class-level variable to track if a bucket has been checked
+    _checked_buckets = set()
+    
     def __init__(self, 
                  bucket_name: str,
                  endpoint: str = settings.MINIO_ENDPOINT,
                  access_key: str = settings.MINIO_ROOT_USER,
                  secret_key: str = settings.MINIO_ROOT_PASSWORD,
-                 region: str =settings.MINIO_REGION):
-                 #use_ssl: str = settings.MINIO_USE_SSL
+                 region: str = settings.MINIO_REGION,
+                 connection_timeout: int = 5):
                  
-        
-        #use_ssl = use_ssl.strip().lower()
-
         self.client = Minio(
             endpoint=endpoint,
             access_key=access_key,
             secret_key=secret_key,
-            #secure= use_ssl in ("true", "1", "t", "y", "yes"),
             region=region
         )
         self.bucket_name = bucket_name
-        self._ensure_bucket_exists()
+        self.connection_timeout = connection_timeout
+        
+        # Only check bucket once per app lifetime for each unique bucket
+        if bucket_name not in self._checked_buckets:
+            self._ensure_bucket_exists()
+            MinioService._checked_buckets.add(bucket_name)
 
     def _ensure_bucket_exists(self):
         try:
+            # Add a timeout to the bucket check operation
             if not self.client.bucket_exists(self.bucket_name):
                 self.client.make_bucket(self.bucket_name)
                 logger.info(f"Bucket '{self.bucket_name}' created successfully.")
@@ -42,6 +48,10 @@ class MinioService:
         except S3Error as e:
             logger.error(f"Error checking/creating bucket '{self.bucket_name}': {e}")
             raise
+        except Exception as e:
+            logger.error(f"Unexpected error connecting to MinIO: {e}")
+            # Continue with app startup even if MinIO is not available
+            logger.warning(f"Proceeding without confirming bucket '{self.bucket_name}' exists.")
     
     async def upload_content(
         self, 
@@ -132,9 +142,45 @@ class MinioService:
             logger.error(f"Error deleting object '{object_name}': {e}")
             raise
 
+    def upload_bytes(self, object_name: str, data: bytes, content_type: str = 'application/octet-stream'):
+        """
+        Upload bytes directly to MinIO
+        
+        Args:
+            object_name: The name/path of the object in MinIO
+            data: The bytes to upload
+            content_type: The MIME type of the content
+            
+        Returns:
+            bool: True if the upload was successful
+        """
+        try:
+            self.client.put_object(
+                bucket_name=self.bucket_name,
+                object_name=object_name,
+                data=BytesIO(data),
+                length=len(data),
+                content_type=content_type
+            )
+            logger.info(f"Content uploaded successfully to '{object_name}'")
+            return True
+        except S3Error as e:
+            logger.error(f"Error uploading content to '{object_name}': {e}")
+            raise
+
     def upload_json(self, object_name: str, data: dict):
         json_bytes = json.dumps(data, indent=4).encode('utf-8')
-        self.upload_bytes(object_name, json_bytes, content_type='application/json')
+        try:
+            self.upload_bytes(object_name, json_bytes, content_type='application/json')
+        except AttributeError:
+            # For backwards compatibility if upload_bytes doesn't exist
+            self.client.put_object(
+                bucket_name=self.bucket_name,
+                object_name=object_name,
+                data=BytesIO(json_bytes),
+                length=len(json_bytes),
+                content_type='application/json'
+            )
 
     def download_json(self, object_name: str, default_value=None) -> dict:
         try:

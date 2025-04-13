@@ -1,23 +1,30 @@
 # routes/competitor_analysis.py
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from openai import OpenAI
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from pydantic import BaseModel
 import uuid
 from uuid import UUID
 from datetime import datetime
+import requests
+import json
+import logging
+import os
+from dotenv import load_dotenv
 
 from app.api.deps import get_db
 from app.models.business.business_idea import BusinessIdea
 from app.models.business.competitive_analysis.competitors import Competitor
 from app.models.business.competitive_analysis.instagram import InstagramScrapingJob, InstagramUserInfo
-from app.controllers.competitor_analysis_controller import CompetitorAnalysisController
+from app.controllers.competitive_analysis.instagram_competitor_controller import InstagramCompetitorController
 from app.services.business.competitive_analysis.instagram.comments.instagram_comment_categorizer import InstagramCommentCategorizer
 from app.services.business.competitive_analysis.instagram.comments.instagram_topic_modeling import InstagramTopicModeling
 from app.services.business.competitive_analysis.instagram.comments.instagram_sentiment_emotion_analyzer import InstagramSentimentEmotionAnalyzer
-import os
-from dotenv import load_dotenv
+from app.services.business.competitive_analysis.instagram.instagram_scraper import InstagramScraper
+from app.services.search.dynamic_research_ai import ResearchModule, ResearchConfig
+from app.prompts.business.prompts_business_competitors import create_validation_competitor_prompt
 
 load_dotenv()
 
@@ -51,6 +58,14 @@ class CommentAnalysisResponse(BaseModel):
     status: str
     results: Optional[dict]
 
+# Schema for research callback request
+class ResearchCallbackRequest(BaseModel):
+    request_id: str
+    business_id: str
+    competitor_id: str
+    task_id: Optional[str] = None
+    research_results: dict
+
 # Simple cache to store task progress
 # In production, you should use Redis or similar
 analysis_progress = {}
@@ -63,15 +78,15 @@ async def start_instagram_competitor_analysis(
 ):
     """
     Start Instagram competitor analysis for a specific business_id.
-    Analyses are executed in the background.
+    Currently runs synchronously for debugging purposes.
     
     Args:
         business_id: UUID of the business idea
-        background_tasks: FastAPI background tasks
+        background_tasks: FastAPI background tasks (not used currently)
         db: Database session
         
     Returns:
-        AnalysisResponse: Task information
+        AnalysisResponse: Task information and results
     """
     try:
         # Verify if business_id exists
@@ -81,8 +96,6 @@ async def start_instagram_competitor_analysis(
         # Check if there are competitors with Instagram URLs
         competitors = db.query(Competitor).filter(
             Competitor.business_idea_id == str(business_id),
-            Competitor.instagram_url.isnot(None),
-            Competitor.instagram_url != ""
         ).all()
 
         if not competitors:
@@ -99,22 +112,33 @@ async def start_instagram_competitor_analysis(
             "error": None
         }
 
-        # Start analysis in background
-        background_tasks.add_task(
-            run_instagram_analysis,
+        # Run analysis synchronously for debugging
+        await run_instagram_full_analysis(
             business_id=str(business_id),
             task_id=task_id,
             db=db
         )
 
+        # Get the final results from the progress cache
+        final_result = analysis_progress.get(task_id, {})
+
         return AnalysisResponse(
             task_id=task_id,
-            message="Instagram competitor analysis started successfully",
-            status="processing"
+            message=f"Instagram competitor analysis completed with status: {final_result.get('status', 'unknown')}",
+            status=final_result.get("status", "unknown")
         )
 
     except Exception as e:
+        # If there was a task_id created, update its status
+        if 'task_id' in locals():
+            analysis_progress[task_id] = {
+                "status": "failed",
+                "error": str(e),
+                "progress": 0
+            }
+        
         raise HTTPException(status_code=500, detail=str(e))
+    
 
 @router.get("/{business_id}/task/{task_id}", response_model=AnalysisProgressResponse)
 async def get_instagram_analysis_progress(
@@ -145,9 +169,10 @@ async def get_instagram_analysis_progress(
         results=progress_data.get("results")
     )
 
-async def run_instagram_analysis(business_id: str, task_id: str, db: Session):
+async def run_instagram_full_analysis(business_id: str, task_id: str, db: Session):
     """
-    Function that executes Instagram analysis in the background and updates progress.
+    Function that executes full Instagram analysis in the background using InstagramScraper.
+    Now uses the InstagramCompetitorController for better separation of concerns.
     
     Args:
         business_id: Business idea ID
@@ -155,119 +180,40 @@ async def run_instagram_analysis(business_id: str, task_id: str, db: Session):
         db: Database session
     """
     try:
-        # Initialize the competitor analysis controller
-        controller = CompetitorAnalysisController(business_id)
-
-        # Get competitors with Instagram URLs
+        # Get all competitors for this business idea
         competitors = db.query(Competitor).filter(
-            Competitor.business_idea_id == business_id,
-            Competitor.instagram_url.isnot(None),
-            Competitor.instagram_url != ""
+            Competitor.business_idea_id == business_id
         ).all()
 
         total_competitors = len(competitors)
         completed = 0
         results = {}
         
+        # Initialize the controller
+        controller = InstagramCompetitorController(business_id=business_id)
+        
         for competitor in competitors:
             try:
-                # Extract username from Instagram URL
                 instagram_url = competitor.instagram_url
-                username = extract_instagram_username(instagram_url)
+
+                username = controller.extract_instagram_username(instagram_url)
                 
                 if username:
-                    # Create or update scraping job record
-                    scraping_job = db.query(InstagramScrapingJob).filter(
-                        InstagramScrapingJob.competitor_id == competitor.id,
-                        InstagramScrapingJob.username == username
-                    ).first()
-                    
-                    if not scraping_job:
-                        # Create new scraping job record
-                        scraping_job = InstagramScrapingJob(
-                            business_id=business_id,
-                            competitor_id=competitor.id,
-                            username=username,
-                            status="processing",
-                            results_limit=10,
-                            max_comments=5,
-                            job_metadata={"task_id": task_id}
-                        )
-                        db.add(scraping_job)
-                        db.commit()
-                        db.refresh(scraping_job)
-                    else:
-                        # Update existing scraping job record
-                        scraping_job.status = "processing"
-                        scraping_job.updated_at = datetime.now(datetime.UTC)
-                        db.commit()
-                    
-                    # Execute analysis for this competitor
+                    # Use the controller to analyze this competitor
                     result = await controller.analyze_instagram_competitor(
                         username=username,
                         competitor_id=competitor.id,
-                        results_limit=10,  # You can adjust these values as needed
+                        results_limit=10,
                         max_comments=5
                     )
-                    
-                    # Update scraping job record with results
-                    if result["status"] == "completed":
-                        scraping_job.status = "completed"
-                        scraping_job.completed_at = datetime.utcnow()
-                        
-                        # Run additional analyses after successful scraping
-                        output_folder = f"businesses/{business_id}/instagram/{username}"
-                        
-                        try:
-                            # Run comment categorization
-                            comment_categorizer = InstagramCommentCategorizer(
-                                username=username,
-                                output_folder=output_folder,
-                                provider="openai",
-                                model="gpt-4-0125-preview"
-                            )
-                            await comment_categorizer.run_analysis()
-                            
-                            # Run topic modeling
-                            topic_modeling = InstagramTopicModeling(
-                                username=username,
-                                output_folder=output_folder,
-                                num_topics=5,
-                                lang="es"
-                            )
-                            await topic_modeling.run_lda_analysis()
-                            
-                            # Run sentiment and emotion analysis
-                            sentiment_analyzer = InstagramSentimentEmotionAnalyzer(
-                                username=username,
-                                output_folder=output_folder
-                            )
-                            await sentiment_analyzer.analyze_sentiment_and_emotions()
-                            
-                            # Update result to include analyses
-                            result["analyses"] = {
-                                "comment_categorization": "completed",
-                                "topic_modeling": "completed",
-                                "sentiment_analysis": "completed"
-                            }
-                        except Exception as analysis_error:
-                            print(f"Error running additional analyses for {username}: {analysis_error}")
-                            result["analyses"] = {
-                                "error": str(analysis_error)
-                            }
-                    else:
-                        scraping_job.status = "failed"
-                        scraping_job.error_message = result.get("error", "Unknown error")
-                    
-                    db.commit()
                     
                     results[competitor.competitor_name] = {
                         "instagram_username": username,
                         "competitor_id": competitor.id,
-                        "status": result["status"],
-                        "message": result.get("message", ""),
-                        "analyses": result.get("analyses", {})
+                        "status": result.get("status", "completed"),
+                        "message": result.get("message", "")
                     }
+                    completed += 1
                 else:
                     results[competitor.competitor_name] = {
                         "instagram_username": None,
@@ -275,37 +221,44 @@ async def run_instagram_analysis(business_id: str, task_id: str, db: Session):
                         "status": "skipped",
                         "reason": "Invalid Instagram URL"
                     }
-
+                    completed += 1
+            
             except Exception as e:
-                # Update scraping job record with error
-                if 'scraping_job' in locals() and scraping_job:
-                    scraping_job.status = "failed"
-                    scraping_job.error_message = str(e)
-                    db.commit()
-                
                 results[competitor.competitor_name] = {
                     "instagram_username": username if 'username' in locals() else None,
                     "competitor_id": competitor.id,
                     "status": "failed",
                     "error": str(e)
                 }
-            
-            completed += 1
-            progress = int((completed / total_competitors) * 100)
+                completed += 1
             
             # Update progress
+            progress = int((completed / total_competitors) * 100)
             analysis_progress[task_id].update({
                 "progress": progress,
                 "results": results,
                 "status": "processing"
             })
 
-        # Mark as completed
-        analysis_progress[task_id].update({
-            "progress": 100,
-            "status": "completed",
-            "results": results
-        })
+        # Check if all competitors are completed or in research_in_progress state
+        all_completed = all(
+            result.get("status") != "research_in_progress" 
+            for result in results.values()
+        )
+        
+        # If all are completed, mark the task as completed
+        if all_completed:
+            analysis_progress[task_id].update({
+                "progress": 100,
+                "status": "completed",
+                "results": results
+            })
+        else:
+            # Otherwise, mark it as waiting for research callbacks
+            analysis_progress[task_id].update({
+                "status": "waiting_for_research",
+                "results": results
+            })
 
     except Exception as e:
         analysis_progress[task_id].update({
@@ -313,33 +266,6 @@ async def run_instagram_analysis(business_id: str, task_id: str, db: Session):
             "error": str(e)
         })
         raise
-
-def extract_instagram_username(instagram_url):
-    """
-    Extract the username from an Instagram URL.
-    
-    Args:
-        instagram_url: Instagram profile URL
-        
-    Returns:
-        str: Instagram username or None if invalid
-    """
-    if not instagram_url:
-        return None
-    
-    # Remove trailing slash if exists
-    if instagram_url.endswith('/'):
-        instagram_url = instagram_url[:-1]
-    
-    # Extract the last segment of the URL
-    parts = instagram_url.split('/')
-    username = parts[-1]
-    
-    # Remove query parameters if they exist
-    if '?' in username:
-        username = username.split('?')[0]
-    
-    return username
 
 # Optional: Endpoint to cancel an ongoing analysis
 @router.delete("/task/{task_id}")

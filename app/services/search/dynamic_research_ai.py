@@ -17,9 +17,15 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ResearchConfig:
     """Configuration for the research module"""
-    model: str  # Can be "sonar", "mistral", etc. for Perplexity models
+    perplexity_api_key: Optional[str] = None
+    validator_api_keys: Optional[Dict[str, str]] = None
+    validator_model: str = "openai:gpt-4o-mini"
     language: str = "en"
     max_iterations: int = 1
+    temperature: float = 0.7
+    require_validation: str = "false"
+    validate_existance: str = "false"
+    model: str = "llama3"  # Default model to use for perplexity
 
 class ResearchModule:
     """
@@ -29,7 +35,7 @@ class ResearchModule:
     with a version that uses an n8n workflow via webhook.
     """
     
-    def __init__(self, config: ResearchConfig):
+    def __init__(self, config: ResearchConfig, model_validator: str = "openai"):
         self.config = config
         self.language = config.language
         # Debug the environment variable value
@@ -46,6 +52,9 @@ class ResearchModule:
         # Log the final URL being used
         logger.info(f"Using n8n webhook URL: {self.n8n_webhook_url}")
         
+        # Get callback API URL from environment
+        self.api_callback_base_url = os.getenv("API_CALLBACK_BASE_URL", "http://localhost:8000")
+        
         # Verificar que las configuraciones clave estén presentes
         if not self.n8n_webhook_url:
             logger.warning("N8N_WEBHOOK_URL no está configurada, usando URL por defecto")
@@ -53,43 +62,114 @@ class ResearchModule:
         if not self.n8n_auth_header:
             logger.warning("N8N_AUTH_HEADER no está configurada, usando valor por defecto")
             
-    async def research(self, query: str) -> str:
+    async def research(self, 
+                       query: Union[dict, str], 
+                       business_id: Optional[str] = None, 
+                       competitor_id: Optional[str] = None, 
+                       task_id: Optional[str] = None) -> str:
         """
         Perform web research on the given query
         
         Args:
-            query: The research query
+            query: The research query (can be a string or a dict with search_query key)
+            business_id: ID of the business idea (optional)
+            competitor_id: ID of the competitor (optional)
+            task_id: ID of the task (optional)
             
         Returns:
             A string containing the research results
         """
         try:
-            logger.info(f"Starting research on query: {query[:50]}...")
+            # Prepare the query data based on input type
+            if isinstance(query, dict):
+                search_query = query.get("search_query", "")
+                callback_data = query
+                research_type = query.get("research_type", "general")
+                logger.info(f"Starting research on query from dict: {search_query[:50]}...")
+            else:
+                # If query is a string, create a query dict
+                search_query = query
+                callback_data = {"search_query": query}
+                research_type = "general"
+                logger.info(f"Starting research on string query: {search_query[:50]}...")
             
-            # Instead of awaiting the result, just make the HTTP call to n8n
-            # This doesn't need to be awaited since we're using requests directly
-            # and we only care about initiating the request, not the final research result
-            # n8n will call our callback URL when it's done
-            result = self._call_n8n_webhook(query)
+            # Generate a request ID if not provided
+            request_id = str(uuid.uuid4())
+            callback_data["request_id"] = request_id
             
-            # Just return the request ID or a status message
-            return result.get("request_id", "Research request submitted")
+            # Generate callback URL based on research type
+            callback_url = None
+            
+            # If we have a specific callback URL in the query dict, use that
+            if "callback_url" in callback_data:
+                callback_url = callback_data["callback_url"]
+                logger.info(f"Using provided callback URL: {callback_url}")
+            else:
+                # Otherwise generate based on the type
+                if research_type == "market_research" or research_type == "state_of_art":
+                    if business_id and task_id:
+                        callback_url = f"{self.api_callback_base_url}/api/v1/business/{business_id}/research-callback/{task_id}"
+                        logger.info(f"Generated business understanding callback URL: {callback_url}")
+                elif business_id and competitor_id:
+                    callback_url = f"{self.api_callback_base_url}/api/v1/business/{business_id}/competitor-analysis/research-callback"
+                    logger.info(f"Generated competitor analysis callback URL: {callback_url}")
+                else:
+                    # Default callback for general research
+                    callback_url = f"{self.api_callback_base_url}/api/v1/research-callback"
+                    logger.info(f"Generated default callback URL: {callback_url}")
+            
+            # Set the callback URL in the data
+            if callback_url:
+                callback_data["callback_url"] = callback_url
+            
+            # Add business_id if provided
+            if business_id:
+                callback_data["business_id"] = business_id
+                
+            # Add competitor_id if provided
+            if competitor_id:
+                callback_data["competitor_id"] = competitor_id
+                
+            # Add task_id if provided
+            if task_id:
+                callback_data["task_id"] = task_id
+            
+            # Add research_type if available
+            if research_type:
+                callback_data["research_type"] = research_type
+            
+            # Make the HTTP call to n8n
+            result = self._call_n8n_webhook(callback_data)
+            
+            # Return the request ID or a status message
+            return result.get("text", "Research request submitted")
             
         except Exception as e:
             logger.error(f"Research error: {str(e)}")
             return f"Error starting research: {str(e)}"
     
-    async def search_and_answer(self, query: str) -> Dict[str, Any]:
+    async def search_and_answer(self, 
+                                query: dict, 
+                                business_id: Optional[str] = None, 
+                                competitor_id: Optional[str] = None, 
+                                task_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Perform web research and return both the answer and sources
         
         Args:
             query: The research query
+            business_id: ID of the business idea (optional)
+            competitor_id: ID of the competitor (optional)
+            task_id: ID of the task (optional)
             
         Returns:
             Dict containing a message about the request and empty sources
         """
         try:
+
+            callback_url = f"{self.api_callback_base_url}/api/v1/business/{business_id}/competitor-analysis/research-callback"
+            query["callback_url"] = callback_url
+            
             response = self._call_n8n_webhook(query)
             return {
                 "answer": response['text'],
@@ -103,12 +183,12 @@ class ResearchModule:
                 "sources": []
             }
     
-    def _call_n8n_webhook(self, research_query: str) -> Dict[str, Any]:
+    def _call_n8n_webhook(self, research_query: Union[dict, str]) -> Dict[str, Any]:
         """
         Call the n8n webhook to perform the research
         
         Args:
-            research_query: The query to research (can contain callback URL as JSON)
+            research_query: The query to research (dict or JSON string)
             
         Returns:
             Dict containing the research results
@@ -121,41 +201,78 @@ class ResearchModule:
             "Content-Type": "application/json"
         }
         
-        # Check if research_query is a JSON string containing callback info
+        # Process the research query
         try:
-            query_data = json.loads(research_query)
-            # Extract the actual search query and callback info
-            search_query = query_data.get("search_query", research_query)
-            callback_url = query_data.get("callback_url")
-            request_id = query_data.get("request_id")
-            business_id = query_data.get("business_id")
+            # If research_query is a string, try to parse it as JSON
+            if isinstance(research_query, str):
+                try:
+                    query_data = json.loads(research_query)
+                except json.JSONDecodeError:
+                    # If not valid JSON, use it directly as the search query
+                    query_data = {
+                        "id": str(uuid.uuid4()),
+                        "lang": self.language,
+                        "answer": "api",
+                        "research": research_query,
+                        "require_validation": self.config.require_validation,
+                        "model": self.config.model,
+                        "depth": self.config.max_iterations,
+                        "validate_existance": self.config.validate_existance
+                    }
+            else:
+                # Research query is already a dictionary
+                query_data = research_query
             
-            # Prepare data payload with callback info if available
+            # Extract the actual search query and callback info
+            search_query = query_data.get("search_query", "")
+            if not search_query and "research" in query_data:
+                search_query = query_data.get("research", "")
+            
+            callback_url = query_data.get("callback_url")
+            request_id = query_data.get("request_id", str(uuid.uuid4()))
+            business_id = query_data.get("business_id")
+            competitor_id = query_data.get("competitor_id")
+            task_id = query_data.get("task_id")
+            
+            # Prepare data payload
             data = {
-                "id": request_id or str(uuid.uuid4()),
+                "id": request_id,
                 "lang": self.language,
                 "answer": "api",
+                "require_validation": self.config.require_validation,
+                "model": self.config.model,
+                "depth": self.config.max_iterations,
+                "validate_existance": self.config.validate_existance,
                 "research": search_query,
-                "require_validation": "true",
-                "model": self.config.model
+                "base_url": self.api_callback_base_url
             }
             
             # Include callback information if available
             if callback_url:
                 data["callback_url"] = callback_url
-                data["request_id"] = request_id
+            
+            # Include additional metadata for the callback
+            if business_id:
                 data["business_id"] = business_id
+            if competitor_id:
+                data["competitor_id"] = competitor_id
+            if task_id:
+                data["task_id"] = task_id
+                
+            if callback_url:
                 logger.info(f"Including callback URL in request: {callback_url}")
             
-        except (json.JSONDecodeError, TypeError):
-            # If not JSON, use the query directly
+        except Exception as e:
+            logger.error(f"Error processing research query: {str(e)}")
             data = {
                 "id": str(uuid.uuid4()),
                 "lang": self.language,
                 "answer": "api",
-                "research": research_query,
-                "require_validation": "true",
-                "model": self.config.model
+                "research": str(research_query),
+                "require_validation": self.config.require_validation,
+                "model": self.config.model,
+                "depth": self.config.max_iterations,
+                "validate_existance": self.config.validate_existance
             }
                 
         logger.info(f"Calling n8n webhook with data: {json.dumps(data)[:200]}...")

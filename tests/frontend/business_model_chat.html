@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Business Model Chat</title>
+    <style>
+        :root {
+            --primary-color: #4a6cf7;
+            --secondary-color: #f3f4f6;
+            --tertiary-color: #e0e0e0;
+            --success-color: #22c55e;
+            --danger-color: #ef4444;
+            --background-color: #ffffff;
+            --text-color: #333333;
+            --border-radius: 8px;
+            --box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Arial', sans-serif;
+        }
+
+        body {
+            background-color: var(--secondary-color);
+            padding: 20px;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            height: calc(100vh - 40px);
+        }
+
+        .sidebar {
+            background-color: white;
+            border-radius: var(--border-radius);
+            padding: 20px;
+            box-shadow: var(--box-shadow);
+            overflow-y: auto;
+        }
+
+        .chat {
+            background-color: white;
+            border-radius: var(--border-radius);
+            display: flex;
+            flex-direction: column;
+            box-shadow: var(--box-shadow);
+        }
+
+        .chat-header {
+            padding: 15px;
+            border-bottom: 1px solid var(--tertiary-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: var(--secondary-color);
+            border-top-left-radius: var(--border-radius);
+            border-top-right-radius: var(--border-radius);
+        }
+
+        .model-progress {
+            display: flex;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .progress-bar {
+            flex-grow: 1;
+            height: 8px;
+            background-color: var(--tertiary-color);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: var(--primary-color);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .chat-messages {
+            flex-grow: 1;
+            padding: 15px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+        }
+
+        .message {
+            margin-bottom: 15px;
+            max-width: 80%;
+            padding: 10px 15px;
+            border-radius: 18px;
+            position: relative;
+            line-height: 1.5;
+        }
+
+        .message-time {
+            font-size: 0.7em;
+            color: #888;
+            margin-top: 5px;
+            text-align: right;
+        }
+
+        .user {
+            background-color: var(--primary-color);
+            color: white;
+            margin-left: auto;
+            border-bottom-right-radius: 4px;
+        }
+
+        .assistant {
+            background-color: var(--secondary-color);
+            border-bottom-left-radius: 4px;
+        }
+
+        .message-suggestion {
+            background-color: rgba(74, 108, 247, 0.1);
+            padding: 10px;
+            margin: 10px 0;
+            border-left: 3px solid var(--primary-color);
+            border-radius: 4px;
+        }
+
+        .suggestion-header {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: var(--primary-color);
+        }
+
+        .suggestion-content {
+            font-style: italic;
+        }
+
+        .chat-input {
+            display: flex;
+            padding: 15px;
+            border-top: 1px solid var(--tertiary-color);
+            background-color: white;
+        }
+
+        input, button {
+            padding: 10px;
+            border-radius: var(--border-radius);
+            border: 1px solid var(--tertiary-color);
+        }
+
+        input {
+            flex-grow: 1;
+            margin-right: 10px;
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background-color: var(--tertiary-color);
+            cursor: not-allowed;
+        }
+
+        .auth-section, .business-section {
+            margin-bottom: 20px;
+        }
+
+        h2 {
+            margin-bottom: 10px;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .connected {
+            background-color: var(--success-color);
+        }
+
+        .disconnected {
+            background-color: var(--danger-color);
+        }
+
+        .business-card {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: var(--border-radius);
+            background-color: var(--secondary-color);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .business-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .business-card.active {
+            background-color: var(--tertiary-color);
+            border-left: 3px solid var(--primary-color);
+        }
+
+        .business-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .business-description {
+            font-size: 0.9em;
+            color: #555;
+            margin-bottom: 8px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        .business-id {
+            font-size: 0.8em;
+            color: #666;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        #debug {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: var(--border-radius);
+            font-family: monospace;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .debug-entry {
+            margin-bottom: 5px;
+            border-bottom: 1px dotted #ccc;
+            padding-bottom: 5px;
+        }
+
+        .debug-entry:last-child {
+            border-bottom: none;
+        }
+
+        .model-finished {
+            text-align: center;
+            padding: 20px;
+            background-color: rgba(34, 197, 94, 0.1);
+            border-radius: var(--border-radius);
+            margin-top: 20px;
+            border: 1px solid var(--success-color);
+        }
+
+        .model-finished h3 {
+            color: var(--success-color);
+            margin-bottom: 10px;
+        }
+
+        .model-report-btn {
+            background-color: var(--success-color);
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="auth-section">
+                <h2>Autenticación</h2>
+                <input type="text" id="token" placeholder="JWT Token" style="width: 100%; margin-bottom: 10px;">
+                <button id="login-btn" style="width: 100%; margin-bottom: 10px;">Login</button>
+                <div class="status" style="justify-content: center; margin-top: 5px;">
+                    <div class="status-dot disconnected" id="auth-status-dot"></div>
+                    <span id="auth-status-text">No autenticado</span>
+                </div>
+            </div>
+
+            <div class="business-section">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h2>Mis Negocios</h2>
+                    <button id="refresh-business-btn" style="padding: 5px 10px; font-size: 0.9em;">
+                        <span>🔄</span> Refrescar
+                    </button>
+                </div>
+                <div id="business-list">
+                    <!-- Las tarjetas de negocios aparecerán aquí -->
+                    <div class="business-empty">
+                        <p>Cargando negocios...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="debug">
+                <h3>Debug</h3>
+                <!-- Mensajes de depuración aparecerán aquí -->
+            </div>
+        </div>
+
+        <div class="chat">
+            <div class="chat-header">
+                <div>
+                    <div class="status">
+                        <div class="status-dot disconnected" id="status-dot"></div>
+                        <span id="status-text">Desconectado</span>
+                    </div>
+                    <div id="business-info">No hay negocio seleccionado</div>
+                </div>
+                <div id="model-info" style="display: none;">
+                    <div class="model-status">Modelo de Negocio en progreso</div>
+                    <div class="model-progress">
+                        <span id="question-counter">0</span>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+                        </div>
+                        <span id="question-total">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="chat-messages" id="messages">
+                <!-- Los mensajes aparecerán aquí -->
+            </div>
+
+            <div class="chat-input">
+                <input type="text" id="message-input" placeholder="Escribe un mensaje..." disabled>
+                <button id="send-btn" disabled>Enviar</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ======= Configuración =======
+        // ¡IMPORTANTE! Esta URL apunta directamente al backend en el puerto 8000
+        const API_URL = 'http://localhost:8000/api/v1';
+        
+        // ======= Estado =======
+        const state = {
+            token: localStorage.getItem('token') || '',
+            businesses: [],
+            selectedBusiness: null,
+            selectedBusinessObject: null,
+            sessionId: null,
+            isConnected: false,
+            modelState: {
+                currentQuestionIndex: 0,
+                totalQuestions: 0,
+                sessionFinished: false
+            }
+        };
+
+        // ======= Elementos DOM =======
+        const elements = {
+            tokenInput: document.getElementById('token'),
+            loginBtn: document.getElementById('login-btn'),
+            refreshBusinessBtn: document.getElementById('refresh-business-btn'),
+            businessList: document.getElementById('business-list'),
+            statusDot: document.getElementById('status-dot'),
+            statusText: document.getElementById('status-text'),
+            authStatusDot: document.getElementById('auth-status-dot'),
+            authStatusText: document.getElementById('auth-status-text'),
+            businessInfo: document.getElementById('business-info'),
+            messages: document.getElementById('messages'),
+            messageInput: document.getElementById('message-input'),
+            sendBtn: document.getElementById('send-btn'),
+            debug: document.getElementById('debug'),
+            modelInfo: document.getElementById('model-info'),
+            questionCounter: document.getElementById('question-counter'),
+            questionTotal: document.getElementById('question-total'),
+            progressFill: document.getElementById('progress-fill')
+        };
+
+        // ======= Funciones de Depuración =======
+        function debug(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `debug-entry debug-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            elements.debug.appendChild(entry);
+            elements.debug.scrollTop = elements.debug.scrollHeight;
+            console.log(`[DEBUG:${type}]`, message);
+        }
+
+        function getTimeString() {
+            const now = new Date();
+            return now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        // ======= Funciones de la API =======
+        async function fetchBusinesses() {
+            debug(`Fetching businesses from ${API_URL}/business-idea/`);
+            try {
+                const response = await fetch(`${API_URL}/business-idea/`, {
+                    headers: {
+                        'Authorization': `Bearer ${state.token}`
+                    }
+                });
+
+                debug(`Response status: ${response.status} ${response.statusText}`);
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch businesses: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                debug(`Fetched businesses: ${JSON.stringify(data).substring(0, 100)}...`);
+                return data;
+            } catch (error) {
+                debug(`Error fetching businesses: ${error.message}`, 'error');
+                throw error;
+            }
+        }
+
+        async function sendMessage(message) {
+            // Usar el endpoint de modelo de negocio con el prefijo correcto
+            const modelEndpoint = `${API_URL}/business-model/${state.selectedBusiness}/chat`;
+            
+            // Crear payload según lo que espera el endpoint de modelo de negocio
+            const payload = {
+                message: message,
+                session_id: state.sessionId || null
+            };
+            
+            debug(`Sending message to business model endpoint: ${modelEndpoint}`);
+            debug(`Payload: ${JSON.stringify(payload)}`);
+            
+            try {
+                const response = await fetch(modelEndpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${state.token}`
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                debug(`Response status: ${response.status} ${response.statusText}`);
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    debug(`Error data: ${JSON.stringify(errorData)}`, 'error');
+                    throw new Error(`Failed to send message: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                debug(`Received response: ${JSON.stringify(data).substring(0, 100)}...`);
+                
+                // Guardar session_id si es la primera respuesta
+                if (data.session_id) {
+                    state.sessionId = data.session_id;
+                    debug(`Saved session ID: ${state.sessionId}`);
+                }
+                
+                return data;
+            } catch (error) {
+                debug(`Error sending message: ${error.message}`, 'error');
+                throw error;
+            }
+        }
+
+        // Función para listar sesiones de modelo de negocio existentes
+        async function fetchBusinessModelSessions(businessId) {
+            debug(`Fetching business model sessions for business: ${businessId}`);
+            try {
+                const response = await fetch(`${API_URL}/business-model/${businessId}/sessions`, {
+                    headers: {
+                        'Authorization': `Bearer ${state.token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch business model sessions: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                debug(`Fetched business model sessions: ${JSON.stringify(data).substring(0, 100)}...`);
+                return data.sessions;
+            } catch (error) {
+                debug(`Error fetching business model sessions: ${error.message}`, 'error');
+                throw error;
+            }
+        }
+
+        // Función para obtener el reporte final del modelo de negocio
+        async function fetchBusinessModelReport(businessId, sessionId) {
+            debug(`Fetching business model report for session: ${sessionId}`);
+            try {
+                const response = await fetch(`${API_URL}/business-model/${businessId}/report/${sessionId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${state.token}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch business model report: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                debug(`Fetched business model report: ${JSON.stringify(data).substring(0, 100)}...`);
+                return data;
+            } catch (error) {
+                debug(`Error fetching business model report: ${error.message}`, 'error');
+                throw error;
+            }
+        }
+
+        // ======= Funciones de UI =======
+        function updateAuthStatus(isAuthenticated) {
+            if (isAuthenticated) {
+                elements.authStatusDot.classList.remove('disconnected');
+                elements.authStatusDot.classList.add('connected');
+                elements.authStatusText.textContent = 'Autenticado';
+                elements.loginBtn.textContent = 'Reautenticar';
+                elements.refreshBusinessBtn.disabled = false;
+            } else {
+                elements.authStatusDot.classList.remove('connected');
+                elements.authStatusDot.classList.add('disconnected');
+                elements.authStatusText.textContent = 'No autenticado';
+                elements.loginBtn.textContent = 'Login';
+                elements.refreshBusinessBtn.disabled = true;
+            }
+        }
+
+        function updateConnectionStatus(isConnected) {
+            state.isConnected = isConnected;
+            
+            if (isConnected) {
+                elements.statusDot.classList.remove('disconnected');
+                elements.statusDot.classList.add('connected');
+                elements.statusText.textContent = 'Conectado';
+                elements.messageInput.disabled = false;
+                elements.sendBtn.disabled = false;
+            } else {
+                elements.statusDot.classList.remove('connected');
+                elements.statusDot.classList.add('disconnected');
+                elements.statusText.textContent = 'Desconectado';
+                elements.messageInput.disabled = true;
+                elements.sendBtn.disabled = true;
+            }
+        }
+
+        function renderBusinesses(businesses) {
+            elements.businessList.innerHTML = '';
+            
+            if (!businesses || businesses.length === 0) {
+                const emptyMessage = document.createElement('div');
+                emptyMessage.className = 'business-empty';
+                emptyMessage.innerHTML = `
+                    <p>No hay negocios disponibles</p>
+                    <p>Crea uno nuevo en la plataforma principal</p>
+                `;
+                elements.businessList.appendChild(emptyMessage);
+                return;
+            }
+            
+            businesses.forEach(business => {
+                const card = document.createElement('div');
+                card.className = 'business-card';
+                card.dataset.id = business.id;
+                
+                // Recortar la descripción si es muy larga
+                const description = business.description ? 
+                    (business.description.length > 100 ? 
+                     business.description.substring(0, 100) + '...' : 
+                     business.description) : 
+                    'Sin descripción';
+                
+                card.innerHTML = `
+                    <div class="business-title">${business.title || 'Sin título'}</div>
+                    <div class="business-description">${description}</div>
+                    <div class="business-id">${business.id}</div>
+                `;
+                card.addEventListener('click', () => selectBusiness(business));
+                elements.businessList.appendChild(card);
+            });
+        }
+
+        function selectBusiness(business) {
+            // Actualizar UI
+            document.querySelectorAll('.business-card').forEach(card => {
+                card.classList.toggle('active', card.dataset.id === business.id);
+            });
+            
+            // Actualizar estado
+            state.selectedBusiness = business.id;
+            state.selectedBusinessObject = business;
+            state.sessionId = null; // Reset session ID cuando cambiamos de negocio
+            
+            // Resetear estado del modelo de negocio
+            state.modelState = {
+                currentQuestionIndex: 0,
+                totalQuestions: 0,
+                sessionFinished: false
+            };
+            
+            // Ocultar panel de info del modelo
+            elements.modelInfo.style.display = 'none';
+            
+            // Mostrar información del negocio seleccionado
+            elements.businessInfo.innerHTML = `
+                <div><strong>${business.title}</strong></div>
+                <div style="font-size: 0.8em;">${business.id}</div>
+            `;
+            
+            elements.messages.innerHTML = '';
+            
+            // Comprobar si hay sesiones de modelo de negocio existentes
+            fetchBusinessModelSessions(business.id)
+                .then(sessions => {
+                    if (sessions && sessions.length > 0) {
+                        const inProgressSessions = sessions.filter(s => !s.session_finished);
+                        const completedSessions = sessions.filter(s => s.session_finished);
+                        
+                        // Mensajes informativos sobre sesiones existentes
+                        let sessionMessage = '';
+                        if (inProgressSessions.length > 0) {
+                            const latestSession = inProgressSessions[0];
+                            sessionMessage = `Tienes ${inProgressSessions.length} sesión(es) de modelo de negocio en progreso. `;
+                            sessionMessage += `La más reciente está en la pregunta ${latestSession.current_question_index} de ${latestSession.total_questions}.`;
+                        }
+                        
+                        if (completedSessions.length > 0) {
+                            sessionMessage += `\n\nTienes ${completedSessions.length} sesión(es) de modelo de negocio completadas.`;
+                        }
+                        
+                        if (sessionMessage) {
+                            addMessage(sessionMessage + "\n\nEscribe tu primer mensaje para iniciar un nuevo modelo de negocio.", 'assistant');
+                        } else {
+                            // Añadir mensaje de bienvenida estándar
+                            addMessage(`¡Bienvenido al modelo de negocio para "${business.title}"! Escribe tu primer mensaje para comenzar.`, 'assistant');
+                        }
+                    } else {
+                        // No hay sesiones existentes
+                        addMessage(`¡Bienvenido al modelo de negocio para "${business.title}"! Escribe tu primer mensaje para comenzar.`, 'assistant');
+                    }
+                })
+                .catch(error => {
+                    debug(`Error fetching business model sessions: ${error.message}`, 'error');
+                    // Añadir mensaje de bienvenida estándar en caso de error
+                    addMessage(`¡Bienvenido al modelo de negocio para "${business.title}"! Escribe tu primer mensaje para comenzar.`, 'assistant');
+                });
+            
+            updateConnectionStatus(true);
+            debug(`Selected business: ${business.id} - ${business.title}`);
+        }
+
+        function addMessage(content, role) {
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${role}`;
+            
+            // Formatear las sugerencias para que sean más legibles
+            let formattedContent = content;
+            
+            if (role === 'assistant') {
+                // 1. Detectar preguntas del modelo de negocio (formato: [N] ETAPA X: ...)
+                const questionRegex = /\[(\d+)\]\s+(ETAPA\s+\d+:[^-]+)\s*-\s*([^\n]+)/i;
+                const questionMatch = content.match(questionRegex);
+                
+                // 2. Buscar patrones de sugerencias con una expresión regular más flexible
+                const suggestionRegex = /Sugerencia(?:\s+basada\s+en[^:]*)?:\s*([^\n]+)(?=\n\n|\?|$)/i;
+                const suggestionMatch = content.match(suggestionRegex);
+                
+                if (questionMatch && suggestionMatch) {
+                    // Caso: Pregunta del modelo de negocio con sugerencia
+                    const questionNum = questionMatch[1];
+                    const etapa = questionMatch[2];
+                    const questionText = questionMatch[3];
+                    const suggestion = suggestionMatch[1].trim();
+                    
+                    // Dividir el contenido en partes
+                    const parts = content.split(suggestionMatch[0]);
+                    const beforeSuggestion = parts[0].trim();
+                    const afterSuggestion = parts.length > 1 ? parts[1].trim() : '';
+                    
+                    // Crear estructura HTML
+                    messageEl.innerHTML = `
+                        <div class="message-content">
+                            <div><strong>${etapa}</strong></div>
+                            <div style="margin: 8px 0"><strong>[${questionNum}]</strong> ${questionText}</div>
+                        </div>
+                        <div class="message-suggestion">
+                            <div class="suggestion-header">Sugerencia:</div>
+                            <div class="suggestion-content">"${suggestion}"</div>
+                        </div>
+                    `;
+                    
+                    if (afterSuggestion) {
+                        messageEl.innerHTML += `<div class="message-content">${afterSuggestion}</div>`;
+                    }
+                    
+                } else if (questionMatch) {
+                    // Caso: Solo pregunta del modelo de negocio
+                    const questionNum = questionMatch[1];
+                    const etapa = questionMatch[2];
+                    const questionText = questionMatch[3];
+                    
+                    messageEl.innerHTML = `
+                        <div class="message-content">
+                            <div><strong>${etapa}</strong></div>
+                            <div style="margin: 8px 0"><strong>[${questionNum}]</strong> ${questionText}</div>
+                            <div>${content.replace(questionRegex, '')}</div>
+                        </div>
+                    `;
+                    
+                } else if (suggestionMatch) {
+                    // Caso: Solo sugerencia
+                    const suggestionText = suggestionMatch[0];
+                    const parts = content.split(suggestionText);
+                    const beforeSuggestion = parts[0].trim();
+                    const afterSuggestion = parts.length > 1 ? parts[1].trim() : '';
+                    const suggestion = suggestionMatch[1].trim();
+                    
+                    let htmlContent = '';
+                    
+                    if (beforeSuggestion) {
+                        htmlContent += `<div class="message-content">${beforeSuggestion}</div>`;
+                    }
+                    
+                    htmlContent += `
+                        <div class="message-suggestion">
+                            <div class="suggestion-header">Sugerencia:</div>
+                            <div class="suggestion-content">"${suggestion}"</div>
+                        </div>
+                    `;
+                    
+                    if (afterSuggestion) {
+                        htmlContent += `<div class="message-content">${afterSuggestion}</div>`;
+                    }
+                    
+                    messageEl.innerHTML = htmlContent;
+                } else {
+                    // Mensaje normal
+                    messageEl.innerHTML = `<div class="message-content">${content}</div>`;
+                }
+                
+            } else {
+                // Mensajes del usuario
+                messageEl.innerHTML = `<div class="message-content">${content}</div>`;
+            }
+            
+            // Agregar la hora del mensaje
+            const timeEl = document.createElement('div');
+            timeEl.className = 'message-time';
+            timeEl.textContent = getTimeString();
+            messageEl.appendChild(timeEl);
+            
+            elements.messages.appendChild(messageEl);
+            elements.messages.scrollTop = elements.messages.scrollHeight;
+        }
+
+        // ======= Event Handlers =======
+        async function handleLogin() {
+            const token = elements.tokenInput.value.trim();
+            if (!token) {
+                alert('Por favor, ingresa un token JWT válido');
+                return;
+            }
+            
+            state.token = token;
+            localStorage.setItem('token', token);
+            elements.tokenInput.value = token;
+            
+            debug(`Token saved: ${token.substring(0, 15)}...`);
+            
+            try {
+                await loadBusinesses();
+                updateAuthStatus(true);
+                debug('Login successful');
+            } catch (error) {
+                debug(`Login failed: ${error.message}`, 'error');
+                alert(`Error al iniciar sesión: ${error.message}`);
+                updateAuthStatus(false);
+            }
+        }
+
+        async function loadBusinesses() {
+            elements.businessList.innerHTML = '<div class="business-empty"><p>Cargando negocios...</p></div>';
+            
+            try {
+                const businesses = await fetchBusinesses();
+                state.businesses = businesses;
+                renderBusinesses(businesses);
+                debug(`Loaded ${businesses.length} businesses`);
+                return businesses;
+            } catch (error) {
+                debug(`Failed to load businesses: ${error.message}`, 'error');
+                elements.businessList.innerHTML = `
+                    <div class="business-empty">
+                        <p>Error al cargar negocios</p>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+                throw error;
+            }
+        }
+
+        async function handleSendMessage() {
+            const message = elements.messageInput.value.trim();
+            if (!message || !state.selectedBusiness) return;
+            
+            elements.messageInput.value = '';
+            addMessage(message, 'user');
+            
+            try {
+                const response = await sendMessage(message);
+                addMessage(response.reply, 'assistant');
+                
+                // Actualizar el estado del modelo de negocio
+                updateModelState(response);
+                
+                // Si el modelo ha finalizado, mostrar mensaje especial
+                if (response.session_finished) {
+                    showModelFinished(response.session_id);
+                }
+            } catch (error) {
+                debug(`Failed to send message: ${error.message}`, 'error');
+                addMessage('Error al enviar mensaje. Por favor, intenta de nuevo.', 'assistant');
+            }
+        }
+        
+        function updateModelState(response) {
+            // Actualizar estado interno
+            state.modelState.currentQuestionIndex = response.current_question_index;
+            state.modelState.totalQuestions = response.total_questions;
+            state.modelState.sessionFinished = response.session_finished;
+            
+            // Mostrar el panel de info del modelo
+            elements.modelInfo.style.display = 'block';
+            
+            // Actualizar contador de preguntas
+            elements.questionCounter.textContent = response.current_question_index;
+            elements.questionTotal.textContent = response.total_questions;
+            
+            // Actualizar barra de progreso
+            const progressPercentage = (response.current_question_index / response.total_questions) * 100;
+            elements.progressFill.style.width = `${progressPercentage}%`;
+            
+            debug(`Business model progress: ${response.current_question_index}/${response.total_questions} (${progressPercentage.toFixed(1)}%)`);
+        }
+        
+        function showModelFinished(sessionId) {
+            // Crear elemento para mostrar que el modelo ha terminado
+            const finishedEl = document.createElement('div');
+            finishedEl.className = 'model-finished';
+            finishedEl.innerHTML = `
+                <h3>¡Modelo de Negocio Completado!</h3>
+                <p>Has completado todas las preguntas del modelo de negocio.</p>
+                <button class="model-report-btn" id="report-btn">Ver Reporte Final</button>
+            `;
+            
+            // Añadir al chat
+            elements.messages.appendChild(finishedEl);
+            elements.messages.scrollTop = elements.messages.scrollHeight;
+            
+            // Añadir event listener para el botón de reporte
+            document.getElementById('report-btn').addEventListener('click', () => {
+                fetchBusinessModelReport(state.selectedBusiness, sessionId)
+                    .then(report => {
+                        // Mostrar el reporte en el chat
+                        const reportEl = document.createElement('div');
+                        reportEl.className = 'message assistant';
+                        reportEl.innerHTML = `
+                            <div class="message-content">
+                                <h3>Reporte Final del Modelo de Negocio</h3>
+                                <pre style="white-space: pre-wrap;">${report.report_markdown}</pre>
+                            </div>
+                            <div class="message-time">${getTimeString()}</div>
+                        `;
+                        elements.messages.appendChild(reportEl);
+                        elements.messages.scrollTop = elements.messages.scrollHeight;
+                    })
+                    .catch(error => {
+                        debug(`Error fetching report: ${error.message}`, 'error');
+                        addMessage('Error al obtener el reporte. Por favor, intenta de nuevo.', 'assistant');
+                    });
+            });
+        }
+
+        // ======= Initialization =======
+        function init() {
+            // Cargar token si existe
+            if (state.token) {
+                elements.tokenInput.value = state.token;
+                debug(`Token loaded from storage: ${state.token.substring(0, 15)}...`);
+                
+                // Intentar cargar negocios automáticamente
+                loadBusinesses()
+                    .then(() => {
+                        updateAuthStatus(true);
+                        debug('Automatically authenticated');
+                    })
+                    .catch(error => {
+                        debug(`Auto-authentication failed: ${error.message}`, 'error');
+                        updateAuthStatus(false);
+                    });
+            } else {
+                updateAuthStatus(false);
+                elements.businessList.innerHTML = `
+                    <div class="business-empty">
+                        <p>Inicia sesión para ver tus negocios</p>
+                    </div>
+                `;
+            }
+            
+            // Configurar event listeners
+            elements.loginBtn.addEventListener('click', handleLogin);
+            elements.refreshBusinessBtn.addEventListener('click', loadBusinesses);
+            elements.sendBtn.addEventListener('click', handleSendMessage);
+            elements.messageInput.addEventListener('keypress', event => {
+                if (event.key === 'Enter') {
+                    handleSendMessage();
+                }
+            });
+            
+            updateConnectionStatus(false);
+            debug('Application initialized');
+        }
+
+        // Iniciar la aplicación cuando el DOM esté listo
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html> 

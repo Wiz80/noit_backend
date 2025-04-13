@@ -9,7 +9,7 @@ from app.services.storage.minio_service import MinioService
 import app.prompts.business.prompts_state_of_art as prompts
 from app.services.search.dynamic_research_ai import ResearchModule, ResearchConfig
 from app.models.business.business_idea import BusinessIdea
-from app.models.business.business_understanding.state_of_art import MarketStateOfArt, StatusEnum
+from app.models.business.business_understanding.state_of_art import MarketStateOfArt, StatusEnum, ResearchTask, ResearchTypeEnum
 from sqlalchemy.orm import Session
 
 from dotenv import load_dotenv
@@ -28,14 +28,12 @@ class MarketStateOfArtService:
         language: str = "en",
         max_iterations: int = 1,
         temperature: float = 0.7,
-        test_mode: bool = False,
-        test_questions_limit: int = 4
+        depth: str = "normal"
     ):
         self.db = db_session
         self.minio = minio_client
         self.language = language
-        self.test_mode = test_mode
-        self.test_questions_limit = test_questions_limit
+        self.depth = depth
         
         if llm_provider == "openai" or llm_provider == "claude":
             self.llm = ai.Client()
@@ -246,41 +244,38 @@ class MarketStateOfArtService:
             logger.error(f"Error generating state of art questions: {str(e)}", exc_info=True)
             raise
     
-    async def answer_questions(
+    async def create_research_tasks(
         self, 
         questions_dict: Dict[str, Any],
+        business_understanding_id: str,
+        business_idea_id: str,
         is_market_research: bool = True
-    ) -> Dict[str, Any]:
-        """Responde a las preguntas usando el módulo de research"""
-        research_type = "market research" if is_market_research else "state of art"
-        logger.info(f"Starting to answer {research_type} questions")
+    ) -> List[ResearchTask]:
+        """Creates research tasks for the questions and sends them to the research module"""
+        research_type = "market_research" if is_market_research else "state_of_art"
+        logger.info(f"Creating research tasks for {research_type}")
         
-        # Check if we're in test mode
-        if self.test_mode:
-            logger.info(f"RUNNING IN TEST MODE - Will only process up to {self.test_questions_limit} questions per category")
+        # Define how many request chunks we'll make based on depth
+        depth_chunks = {
+            "very simple": 1,  # All questions in one request
+            "simple": 2,       # Split into 2 requests
+            "normal": 3,       # Split into 3 requests
+            "pro": 4,          # Split into 4 requests
+            "deep": 6          # Split into 6 requests (or one per category)
+        }
         
-        result = {}
+        # Get the number of chunks based on depth
+        num_chunks = depth_chunks.get(self.depth, 3)  # Default to 'normal' if invalid depth
+        logger.info(f"Using depth '{self.depth}' - will process all questions in {num_chunks} large request(s)")
         
-        # Log the structure of the questions_dict to help debug
-        logger.info(f"Questions dictionary structure: {json.dumps(questions_dict, indent=2)[:500]}...")
+        # Extract all questions into a flat structure for processing
+        all_questions = []
+        question_mapping = {}  # Maps question to its original location
         
-        # Extraemos todas las preguntas según el formato
         if is_market_research:
-            # Para investigación de mercado
-            logger.info(f"Processing market research questions with {len(questions_dict)} main categories")
-            
-            # In test mode, limit the number of categories
-            categories_to_process = list(questions_dict.keys())
-            if self.test_mode and len(categories_to_process) > 2:
-                logger.info(f"TEST MODE: Limiting to first 2 categories instead of {len(categories_to_process)}")
-                categories_to_process = categories_to_process[:2]
-            
-            for main_category in categories_to_process:
+            # For market research
+            for main_category in questions_dict.keys():
                 category_data = questions_dict[main_category]
-                logger.info(f"Processing main category: {main_category}")
-                logger.info(f"Category data keys: {list(category_data.keys())}")
-                
-                result[main_category] = {"subitems": []}
                 
                 # Check if the expected structure exists
                 if "subitems" not in category_data:
@@ -306,131 +301,281 @@ class MarketStateOfArtService:
                                 "preguntas": questions
                             }]
                         else:
-                            logger.warning(f"Could not extract questions from category {main_category}")
                             continue
                 else:
                     subitems = category_data["subitems"]
                 
-                # In test mode, limit the number of subitems
-                if self.test_mode and len(subitems) > 2:
-                    logger.info(f"TEST MODE: Limiting to first 2 subitems instead of {len(subitems)}")
-                    subitems = subitems[:2]
-                
-                for subitem in subitems:
+                # Create subitems in result structure
+                for idx, subitem in enumerate(subitems):
                     # Handle different key formats (English/Spanish)
                     title = subitem.get("titulo", subitem.get("title", "Unknown"))
                     questions = subitem.get("preguntas", subitem.get("questions", []))
                     
-                    # In test mode, limit the number of questions
-                    if self.test_mode and len(questions) > self.test_questions_limit:
-                        logger.info(f"TEST MODE: Limiting to first {self.test_questions_limit} questions instead of {len(questions)}")
-                        questions = questions[:self.test_questions_limit]
+                    logger.info(f"Collecting questions from {main_category} - {title}: {len(questions)} questions")
                     
-                    logger.info(f"Processing subitem: {title} with {len(questions)} questions")
-                    subitem_result = {
-                        "titulo": title,
-                        "preguntas": questions,
-                        "respuestas": []
-                    }
-                    
-                    # Procesar las preguntas en batches para optimizar
-                    batch_size = 3  # Procesar 3 preguntas a la vez
-                    for i in range(0, len(questions), batch_size):
-                        batch = questions[i:i+batch_size]
-                        logger.info(f"Processing batch of {len(batch)} questions (from {i} to {i+len(batch)-1})")
-                        
-                        # Crear tareas para responder preguntas en paralelo
-                        logger.info("Creating research tasks for batch")
-                        tasks = [self.research_module.research(question) for question in batch]
-                        logger.info("Awaiting research tasks to complete")
-                        batch_answers = await asyncio.gather(*tasks)
-                        logger.info(f"Received {len(batch_answers)} answers for batch")
-                        
-                        subitem_result["respuestas"].extend(batch_answers)
-                    
-                    result[main_category]["subitems"].append(subitem_result)
-                    logger.info(f"Completed processing subitem: {title}")
+                    # Add questions to the flat list and keep track of their location
+                    for question in questions:
+                        all_questions.append(question)
+                        question_mapping[question] = (main_category, idx)
         else:
-            # Para estado del arte
-            logger.info(f"Processing state of art questions with {len(questions_dict)} categories")
-            
-            # In test mode, limit the number of categories
-            categories_to_process = list(questions_dict.keys())
-            if self.test_mode and len(categories_to_process) > 2:
-                logger.info(f"TEST MODE: Limiting to first 2 categories instead of {len(categories_to_process)}")
-                categories_to_process = categories_to_process[:2]
-            
-            for category in categories_to_process:
-                logger.info(f"Processing category: {category}")
+            # For state of art
+            for category in questions_dict.keys():
                 category_data = questions_dict.get(category, {})
                 
-                # Check if the category is present in the questions_dict
+                # Check if the category is present
                 if not category_data:
-                    logger.warning(f"No data found for category {category}")
-                    # Create an empty structure for this category
-                    result[category] = {
-                        "preguntasPrincipales": [],
-                        "fuentesSugeridas": [],
-                        "respuestas": []
-                    }
                     continue
-                
-                logger.info(f"Category data keys: {list(category_data.keys())}")
                 
                 # Handle different key formats (English/Spanish)
                 main_questions = category_data.get("preguntasPrincipales", 
-                                                 category_data.get("mainQuestions", 
-                                                                 category_data.get("questions", [])))
-                suggested_sources = category_data.get("fuentesSugeridas", 
-                                                    category_data.get("suggestedSources", []))
+                                                category_data.get("mainQuestions", 
+                                                                category_data.get("questions", [])))
                 
                 # If still no questions found, try to extract them from other keys
                 if not main_questions and isinstance(category_data, dict):
-                    logger.warning(f"No main questions found in category {category}. Trying to extract from other keys.")
                     for key, value in category_data.items():
                         if isinstance(value, list) and all(isinstance(item, str) for item in value):
-                            logger.info(f"Found potential questions in key {key}")
                             main_questions = value
                             break
                 
-                # In test mode, limit the number of questions
-                if self.test_mode and len(main_questions) > self.test_questions_limit:
-                    logger.info(f"TEST MODE: Limiting to first {self.test_questions_limit} questions instead of {len(main_questions)}")
-                    main_questions = main_questions[:self.test_questions_limit]
+                logger.info(f"Collecting questions from {category}: {len(main_questions)} questions")
                 
-                result[category] = {
-                    "preguntasPrincipales": main_questions,
-                    "fuentesSugeridas": suggested_sources,
-                    "respuestas": []
+                # Add questions to the flat list and keep track of their location
+                for question in main_questions:
+                    all_questions.append(question)
+                    question_mapping[question] = category
+        
+        # Log total question count
+        logger.info(f"Total questions collected: {len(all_questions)}")
+        
+        # Split questions into chunks based on depth
+        if num_chunks > len(all_questions):
+            num_chunks = len(all_questions)
+            logger.info(f"Reducing number of chunks to {num_chunks} as there are only {len(all_questions)} questions")
+            
+        chunk_size = len(all_questions) // num_chunks
+        remainder = len(all_questions) % num_chunks
+        
+        question_chunks = []
+        start = 0
+        for i in range(num_chunks):
+            # Add an extra item to the first 'remainder' chunks
+            end = start + chunk_size + (1 if i < remainder else 0)
+            question_chunks.append(all_questions[start:end])
+            start = end
+        
+        # Log chunk distribution
+        for i, chunk in enumerate(question_chunks):
+            logger.info(f"Chunk {i+1} has {len(chunk)} questions")
+        
+        # Create and send research tasks
+        research_tasks = []
+        for i, chunk in enumerate(question_chunks):
+            logger.info(f"Processing chunk {i+1}/{len(question_chunks)} with {len(chunk)} questions")
+            
+            # Create research task record
+            task = ResearchTask(
+                business_understanding_id=business_understanding_id,
+                business_idea_id=business_idea_id,
+                request_id="pending",  # Will be updated after sending to research module
+                research_type=ResearchTypeEnum.MARKET_RESEARCH if is_market_research else ResearchTypeEnum.STATE_OF_ART,
+                depth=self.depth,
+                chunk_index=f"{i+1}/{num_chunks}",
+                status=StatusEnum.PENDING
+            )
+            
+            # Store questions in task
+            task.add_questions(chunk)
+            
+            # Save task to database
+            self.db.add(task)
+            self.db.commit()
+            self.db.refresh(task)
+            
+            # Create and send research request
+            try:
+                # Create the callback URL with the task ID
+                callback_url = f"/api/v1/business/{business_idea_id}/research-callback/{task.id}"
+                
+                # Send research request
+                request_dict = {
+                    "search_query": "\n".join(chunk),
+                    "task_id": task.id,
+                    "business_id": business_idea_id,
+                    "research_type": research_type,
+                    "callback_url": callback_url
                 }
                 
-                # Procesar las preguntas en batches
-                logger.info(f"Category has {len(main_questions)} main questions")
-                batch_size = 3
-                for i in range(0, len(main_questions), batch_size):
-                    batch = main_questions[i:i+batch_size]
-                    logger.info(f"Processing batch of {len(batch)} questions (from {i} to {i+len(batch)-1})")
-                    
-                    # Crear tareas para responder preguntas en paralelo
-                    logger.info("Creating research tasks for batch")
-                    tasks = [self.research_module.research(question) for question in batch]
-                    logger.info("Awaiting research tasks to complete")
-                    batch_answers = await asyncio.gather(*tasks)
-                    logger.info(f"Received {len(batch_answers)} answers for batch")
-                    
-                    result[category]["respuestas"].extend(batch_answers)
-                logger.info(f"Completed processing category: {category}")
+                # Send to research module
+                response = await self.research_module.research(
+                    query=request_dict,
+                    business_id=business_idea_id,
+                    task_id=task.id
+                )
+                
+                # Extract request ID from response
+                request_id = None
+                if isinstance(response, str) and "ID:" in response:
+                    # Try to extract request ID from response text
+                    try:
+                        request_id = response.split("ID:")[1].split(".")[0].strip()
+                    except:
+                        request_id = "unknown"
+                
+                # Update task with request ID
+                task.request_id = request_id
+                task.status = StatusEnum.IN_PROGRESS
+                self.db.commit()
+                
+                logger.info(f"Research task created and sent: ID={task.id}, RequestID={request_id}")
+                research_tasks.append(task)
+                
+            except Exception as e:
+                logger.error(f"Error sending research task: {str(e)}", exc_info=True)
+                task.status = StatusEnum.FAILED
+                task.error_message = str(e)
+                self.db.commit()
         
-        logger.info(f"Completed answering all {research_type} questions")
+        return research_tasks
+
+    async def process_callback_data(
+        self,
+        task_id: str,
+        research_data: Dict[str, Any]
+    ) -> bool:
+        """Process callback data from research module and update the task"""
+        logger.info(f"Processing callback data for task: {task_id}")
+        
+        # Find the task
+        task = self.db.query(ResearchTask).filter(ResearchTask.id == task_id).first()
+        if not task:
+            logger.error(f"Task with ID {task_id} not found")
+            return False
+        
+        try:
+            # Update task with answer data
+            task.add_answer(research_data)
+            task.status = StatusEnum.COMPLETED
+            self.db.commit()
+            
+            # Get all tasks for this business understanding
+            business_understanding = task.business_understanding
+            all_tasks = self.db.query(ResearchTask).filter(
+                ResearchTask.business_understanding_id == business_understanding.id,
+                ResearchTask.research_type == task.research_type
+            ).all()
+            
+            # Check if all tasks are completed
+            all_completed = all(t.status == StatusEnum.COMPLETED for t in all_tasks)
+            
+            if all_completed:
+                logger.info(f"All {task.research_type} tasks completed, compiling results")
+                
+                # Compile results based on the type
+                compiled_results = self.compile_research_results(
+                    business_understanding,
+                    all_tasks,
+                    is_market_research=(task.research_type == ResearchTypeEnum.MARKET_RESEARCH)
+                )
+                
+                # Store results in MinIO
+                object_name = f"{task.business_idea_id}/business-understanding/{task.research_type}_{self.depth}.json"
+                
+                await self.minio.upload_content(
+                    object_name=object_name,
+                    data=json.dumps(compiled_results, indent=2),
+                    content_type="application/json",
+                    metadata={
+                        "business_id": task.business_idea_id,
+                        "type": task.research_type
+                    }
+                )
+                
+                # Update business understanding record
+                if task.research_type == ResearchTypeEnum.MARKET_RESEARCH:
+                    business_understanding.market_research_path = object_name
+                    business_understanding.market_research_status = StatusEnum.COMPLETED
+                else:
+                    business_understanding.state_of_art_path = object_name
+                    business_understanding.state_of_art_status = StatusEnum.COMPLETED
+                
+                self.db.commit()
+                logger.info(f"Business understanding record updated with {task.research_type} results")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error processing callback data: {str(e)}", exc_info=True)
+            task.status = StatusEnum.FAILED
+            task.error_message = str(e)
+            self.db.commit()
+            return False
+    
+    def compile_research_results(
+        self,
+        business_understanding: MarketStateOfArt,
+        tasks: List[ResearchTask],
+        is_market_research: bool = True
+    ) -> Dict[str, Any]:
+        """Compile research results from tasks into the original structure"""
+        logger.info(f"Compiling {'market research' if is_market_research else 'state of art'} results")
+        
+        # Get questions_dict from the first task
+        # This is just to get the original structure
+        result = {}
+        
+        # Get all questions and answers
+        answers = {}
+        question_mapping = {}
+        
+        # Extract all answers and mappings from completed tasks
+        for task in tasks:
+            if task.status != StatusEnum.COMPLETED:
+                continue
+                
+            task_questions = task.get_questions()
+            task_answer = task.get_answer()
+            
+            if not task_answer:
+                continue
+                
+            # Map answers to questions
+            for question in task_questions:
+                if question not in question_mapping:
+                    if is_market_research:
+                        # Find the question in the original structure
+                        # This is a placeholder - we'll need to get this from somewhere
+                        question_mapping[question] = ("Unknown", 0)
+                    else:
+                        question_mapping[question] = "Unknown"
+                    
+                    # Store the answer
+                    answers[question] = task_answer
+        
+        # Now construct the result structure
+        if is_market_research:
+            # Here we'd need the original questions structure
+            # This is a placeholder implementation
+            pass
+        else:
+            # Here we'd need the original questions structure
+            # This is a placeholder implementation
+            pass
+            
         return result
     
     async def process_business_understanding(
         self, 
         business_idea_id: str,
-        force_update: bool = False
+        force_update: bool = False,
+        depth: str = "normal"
     ) -> Dict[str, Any]:
         """Procesa toda la lógica de business understanding para una idea de negocio"""
         logger.info(f"Starting business understanding process for business idea: {business_idea_id}")
+        
+        # Update the depth parameter
+        self.depth = depth
+        logger.info(f"Using depth parameter: {self.depth}")
         
         # Obtener o crear registros
         logger.info("Getting business idea from database")
@@ -442,8 +587,8 @@ class MarketStateOfArtService:
         logger.info(f"Business understanding record ID: {business_understanding.id}")
         
         # Define paths for MinIO objects
-        market_research_path = f"{business_idea_id}/business-understanding/market_research.json"
-        state_of_art_path = f"{business_idea_id}/business-understanding/state_of_art.json"
+        market_research_path = f"{business_idea_id}/business-understanding/market_research_{self.depth}.json"
+        state_of_art_path = f"{business_idea_id}/business-understanding/state_of_art_{self.depth}.json"
         
         # If force_update is True, delete existing files in MinIO
         if force_update:
@@ -473,48 +618,36 @@ class MarketStateOfArtService:
                 business_understanding.market_research_status = StatusEnum.IN_PROGRESS
                 self.db.commit()
                 
+                # Delete any existing research tasks
+                if force_update:
+                    logger.info("Deleting existing market research tasks")
+                    self.db.query(ResearchTask).filter(
+                        ResearchTask.business_understanding_id == business_understanding.id,
+                        ResearchTask.research_type == ResearchTypeEnum.MARKET_RESEARCH
+                    ).delete()
+                    self.db.commit()
+                
                 # Generar preguntas
                 logger.info("Generating market research questions")
                 market_research_questions = await self.generate_market_research_questions(business_idea)
                 logger.info("Market research questions generated successfully")
                 
-                # Responder preguntas
-                logger.info("Starting to answer market research questions")
-                market_research_answers = await self.answer_questions(
-                    market_research_questions, 
+                # Create research tasks
+                logger.info("Creating market research tasks")
+                market_research_tasks = await self.create_research_tasks(
+                    questions_dict=market_research_questions,
+                    business_understanding_id=business_understanding.id,
+                    business_idea_id=business_idea_id,
                     is_market_research=True
                 )
-                logger.info("Market research questions answered successfully")
-                
-                # Guardar en MinIO
-                logger.info(f"Uploading market research answers to MinIO at path: {market_research_path}")
-                try:
-                    await self.minio.upload_content(
-                        object_name=market_research_path,
-                        data=json.dumps(market_research_answers, indent=2),
-                        content_type="application/json",
-                        metadata={
-                            "business_id": business_idea_id,
-                            "type": "market_research"
-                        }
-                    )
-                    logger.info("Market research answers uploaded to MinIO successfully")
-                except Exception as upload_error:
-                    logger.error(f"Failed to upload market research to MinIO: {str(upload_error)}", exc_info=True)
-                    raise Exception(f"Failed to upload market research to MinIO: {str(upload_error)}")
-                
-                # Actualizar registro
-                logger.info("Updating business understanding record with market research path")
-                business_understanding.market_research_path = market_research_path
-                business_understanding.market_research_status = StatusEnum.COMPLETED
-                self.db.commit()
-                logger.info("Business understanding record updated successfully")
+                logger.info(f"Created {len(market_research_tasks)} market research tasks")
                 
                 results["market_research"] = {
-                    "status": "completed",
-                    "path": market_research_path
+                    "status": "in_progress",
+                    "tasks_created": len(market_research_tasks),
+                    "task_ids": [task.id for task in market_research_tasks]
                 }
-                logger.info("Market research process completed successfully")
+                logger.info("Market research process initiated")
                 
             except Exception as e:
                 logger.error(f"Error in market research process: {str(e)}", exc_info=True)
@@ -543,48 +676,36 @@ class MarketStateOfArtService:
                 business_understanding.state_of_art_status = StatusEnum.IN_PROGRESS
                 self.db.commit()
                 
+                # Delete any existing research tasks
+                if force_update:
+                    logger.info("Deleting existing state of art tasks")
+                    self.db.query(ResearchTask).filter(
+                        ResearchTask.business_understanding_id == business_understanding.id,
+                        ResearchTask.research_type == ResearchTypeEnum.STATE_OF_ART
+                    ).delete()
+                    self.db.commit()
+                
                 # Generar preguntas
                 logger.info("Generating state of art questions")
                 state_of_art_questions = await self.generate_state_of_art_questions(business_idea)
                 logger.info("State of art questions generated successfully")
                 
-                # Responder preguntas
-                logger.info("Starting to answer state of art questions")
-                state_of_art_answers = await self.answer_questions(
-                    state_of_art_questions, 
+                # Create research tasks
+                logger.info("Creating state of art tasks")
+                state_of_art_tasks = await self.create_research_tasks(
+                    questions_dict=state_of_art_questions,
+                    business_understanding_id=business_understanding.id,
+                    business_idea_id=business_idea_id,
                     is_market_research=False
                 )
-                logger.info("State of art questions answered successfully")
-                
-                # Guardar en MinIO
-                logger.info(f"Uploading state of art answers to MinIO at path: {state_of_art_path}")
-                try:
-                    await self.minio.upload_content(
-                        object_name=state_of_art_path,
-                        data=json.dumps(state_of_art_answers, indent=2),
-                        content_type="application/json",
-                        metadata={
-                            "business_id": business_idea_id,
-                            "type": "state_of_art"
-                        }
-                    )
-                    logger.info("State of art answers uploaded to MinIO successfully")
-                except Exception as upload_error:
-                    logger.error(f"Failed to upload state of art to MinIO: {str(upload_error)}", exc_info=True)
-                    raise Exception(f"Failed to upload state of art to MinIO: {str(upload_error)}")
-                
-                # Actualizar registro
-                logger.info("Updating business understanding record with state of art path")
-                business_understanding.state_of_art_path = state_of_art_path
-                business_understanding.state_of_art_status = StatusEnum.COMPLETED
-                self.db.commit()
-                logger.info("Business understanding record updated successfully")
+                logger.info(f"Created {len(state_of_art_tasks)} state of art tasks")
                 
                 results["state_of_art"] = {
-                    "status": "completed",
-                    "path": state_of_art_path
+                    "status": "in_progress",
+                    "tasks_created": len(state_of_art_tasks),
+                    "task_ids": [task.id for task in state_of_art_tasks]
                 }
-                logger.info("State of art process completed successfully")
+                logger.info("State of art process initiated")
                 
             except Exception as e:
                 logger.error(f"Error in state of art process: {str(e)}", exc_info=True)
@@ -604,5 +725,5 @@ class MarketStateOfArtService:
                 "path": business_understanding.state_of_art_path
             }
         
-        logger.info("Business understanding process completed")
+        logger.info("Business understanding process initiated")
         return results

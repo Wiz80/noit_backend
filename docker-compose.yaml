@@ -31,7 +31,19 @@ services:
       - MINIO_ROOT_PASSWORD=minioadmin
     command: server --console-address ":9001" /data
 
+  mage:
+    image: mageai/mageai:latest
+    ports:
+      - "6789:6789"
+    volumes:
+      - ./pipelines:/home/src
+    environment:
+      - MAGE_DATABASE_CONNECTION_URL=postgresql://postgres:postgres@db:5432/business_ai
+    depends_on:
+      - db
+
 volumes:
   postgres_data:
   minio_data:
   redis_data:
+  pipelines:

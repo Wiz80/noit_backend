@@ -4,7 +4,7 @@ import logging
 import uuid
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.core.config import settings
 
 # Configure logging
@@ -25,9 +25,9 @@ class ChatMessage(BaseModel):
 class ChatSession(BaseModel):
     """Model for chat sessions"""
     id: str
-    user_id: int
-    business_id: int
-    messages: List[ChatMessage] = []
+    user_id: str
+    business_id: str
+    messages: List[Dict[str, Any]] = []
     metadata: Dict[str, Any] = {}
     created_at: datetime = None
     updated_at: datetime = None
@@ -70,20 +70,20 @@ class RedisChatService:
         """Get Redis key for a chat session"""
         return f"chat:session:{session_id}"
     
-    def _get_user_sessions_key(self, user_id: int) -> str:
+    def _get_user_sessions_key(self, user_id: str) -> str:
         """Get Redis key for user's sessions"""
         return f"chat:user:{user_id}:sessions"
     
-    def _get_business_sessions_key(self, business_id: int) -> str:
+    def _get_business_sessions_key(self, business_id: str) -> str:
         """Get Redis key for business's sessions"""
         return f"chat:business:{business_id}:sessions"
 
     async def create_session(
         self, 
-        user_id: int, 
-        business_id: int, 
+        user_id: str, 
+        business_id: str, 
         metadata: Dict[str, Any] = None,
-        initial_messages: List[Dict[str, str]] = None
+        initial_messages: List[Dict[str, Any]] = None
     ) -> ChatSession:
         """
         Create a new chat session
@@ -106,8 +106,7 @@ class RedisChatService:
         
         # Add initial messages if provided
         if initial_messages:
-            for msg in initial_messages:
-                session.messages.append(ChatMessage(**msg))
+            session.messages.extend(initial_messages)
         
         # Serialize and store in Redis
         session_data = session.model_dump_json()
@@ -147,13 +146,6 @@ class RedisChatService:
         try:
             # Parse the JSON data and create a ChatSession object
             session_dict = json.loads(session_data)
-            
-            # Convert message dictionaries to ChatMessage objects
-            if 'messages' in session_dict:
-                session_dict['messages'] = [
-                    ChatMessage(**msg) for msg in session_dict['messages']
-                ]
-            
             return ChatSession(**session_dict)
         except Exception as e:
             logger.error(f"Error parsing chat session {session_id}: {e}")
@@ -162,16 +154,14 @@ class RedisChatService:
     async def add_message(
         self, 
         session_id: str, 
-        role: str, 
-        content: str
+        message: Dict[str, Any]
     ) -> Optional[ChatSession]:
         """
         Add a message to a chat session
         
         Args:
             session_id: ID of the session
-            role: Role of the message sender ('user', 'system', or 'assistant')
-            content: Content of the message
+            message: Message dictionary with 'role' and 'content' keys
             
         Returns:
             Updated ChatSession object or None if session not found
@@ -181,8 +171,11 @@ class RedisChatService:
             logger.warning(f"Cannot add message to non-existent session {session_id}")
             return None
         
+        # Add timestamp if not present
+        if "timestamp" not in message:
+            message["timestamp"] = datetime.now().isoformat()
+        
         # Add message
-        message = ChatMessage(role=role, content=content)
         session.messages.append(message)
         session.updated_at = datetime.now()
         
@@ -191,10 +184,10 @@ class RedisChatService:
         session_data = session.model_dump_json()
         self.redis.set(session_key, session_data, ex=self.default_ttl)
         
-        logger.info(f"Added {role} message to session {session_id}")
+        logger.info(f"Added {message['role']} message to session {session_id}")
         return session
     
-    async def get_user_sessions(self, user_id: int) -> List[str]:
+    async def get_user_sessions(self, user_id: str) -> List[str]:
         """
         Get all session IDs for a user
         
@@ -208,7 +201,7 @@ class RedisChatService:
         session_ids = self.redis.smembers(user_sessions_key)
         return list(session_ids)
     
-    async def get_business_sessions(self, business_id: int) -> List[str]:
+    async def get_business_sessions(self, business_id: str) -> List[str]:
         """
         Get all session IDs for a business
         
@@ -287,7 +280,7 @@ class RedisChatService:
         self, 
         session_id: str, 
         limit: int = None
-    ) -> List[Dict[str, str]]:
+    ) -> List[Dict[str, Any]]:
         """
         Get conversation history for a session
         
@@ -307,12 +300,4 @@ class RedisChatService:
         if limit and len(messages) > limit:
             messages = messages[-limit:]
         
-        # Convert to simple dict format
-        return [
-            {
-                "role": msg.role,
-                "content": msg.content,
-                "timestamp": msg.timestamp.isoformat() if msg.timestamp else None
-            }
-            for msg in messages
-        ] 
+        return messages 

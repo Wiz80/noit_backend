@@ -7,6 +7,9 @@ from enum import Enum
 import aisuite as ai
 from openai import OpenAI
 from app.services.cache.redis_service import RedisChatService, ChatSession
+from sqlalchemy.orm import Session
+from app.models.business.business_idea import BusinessIdea
+from app.crud.crud_business_idea import CRUDBusinessIdea
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -38,11 +41,15 @@ class BusinessChatStatus(BaseModel):
 
 class BusinessChatConfig(BaseModel):
     """Configuration for the business chat module"""
-    business_id: int
-    user_id: int
+    business_id: str
+    user_id: str
     language: str = "es"
     llm_provider: str = "openai"
     llm_model: str = "gpt-4o"
+    db_session: Optional[Session] = None
+    llm_client: Optional[Any] = None
+    
+    model_config = {"arbitrary_types_allowed": True}
     
     def __init__(self, **data):
         super().__init__(**data)
@@ -66,7 +73,8 @@ class BusinessChatService:
     def __init__(
         self, 
         config: BusinessChatConfig,
-        redis_service: RedisChatService
+        redis_service: RedisChatService,
+        business_crud: Optional[CRUDBusinessIdea] = None
     ):
         self.config = config
         self.redis = redis_service
@@ -75,33 +83,39 @@ class BusinessChatService:
         self.llm_client = config.llm_client
         self.llm_model = config.llm_model
         self.language = config.language
+        self.db = config.db_session
+        self.business_crud = business_crud
         
-        # Define all questions by stage
+        # Define all questions by stage - More concise questions
         self.questions = {
             Stage.BUSINESS_UNDERSTANDING: [
-                "¿Qué hace la empresa? ¿Cuál es su propósito?",
-                "¿Cuál es su propuesta de valor?",
-                "¿Qué productos/servicios ofrece y a quiénes?",
-                "¿Cuál es el cliente ideal?",
-                "¿Qué problema resuelve?",
-                "¿Qué los hace diferentes frente a la competencia?",
-                "¿Qué desafíos u oportunidades clave enfrentan hoy?"
+                "Cuéntame brevemente, ¿qué hace tu empresa y cuál es su propósito principal?",
+                "¿Cuál es tu propuesta de valor única? ¿Qué te diferencia?",
+                "Describe tus productos o servicios principales y a qué clientes están dirigidos.",
+                "¿Quién es tu cliente ideal? Describe sus características principales.",
+                "¿Qué problema específico resuelves para tus clientes?"
             ],
             Stage.COMMUNICATION_NEEDS: [
-                "¿Qué está ocurriendo alrededor del negocio o mercado que hace necesaria esta comunicación?",
-                "¿Cuál es la oportunidad de negocio concreta?",
-                "¿Qué objetivo tiene esta comunicación (posicionamiento, lanzamiento, awareness, conversión, etc.)?"
+                "¿Qué tendencias o cambios en el mercado hacen necesaria tu comunicación ahora?",
+                "¿Cuál es la oportunidad de negocio que quieres aprovechar?",
+                "¿Qué objetivos concretos buscas con esta comunicación?"
             ],
             Stage.COMMUNICATION_STRATEGY: [
-                "¿Cuál es la idea o mensaje clave a comunicar?",
-                "¿A quién va dirigida esta comunicación?",
-                "¿Qué valores o características tiene esta audiencia que deberíamos considerar?",
-                "¿Por qué nos creerían? ¿Qué hace nuestra promesa creíble?",
-                "¿Cómo vamos a sonar (tono, voz, estilo)?",
-                "¿Cuál es el indicador de éxito más importante? ¿Qué cifras o resultados esperamos?",
-                "¿Qué queremos que la audiencia piense, sienta o haga después de recibir esta comunicación?",
-                "¿Hay limitaciones legales, presupuestarias o de formatos? ¿Canales obligatorios o a evitar? ¿Fechas clave?"
+                "Resume en una frase el mensaje clave que quieres comunicar.",
+                "Describe a tu audiencia objetivo para esta comunicación.",
+                "¿Qué te hace creíble ante esta audiencia?",
+                "¿Cuál es el tono y estilo de comunicación que mejor representa tu marca?",
+                "¿Qué métricas usarás para medir el éxito de esta comunicación?",
+                "¿Qué quieres que haga tu audiencia después de recibir tu mensaje?",
+                "¿Hay limitaciones o fechas clave para esta comunicación?"
             ]
+        }
+        
+        # Fields that map to the BusinessIdea model
+        self.field_mappings = {
+            "Cuéntame brevemente, ¿qué hace tu empresa y cuál es su propósito principal?": "description",
+            "¿Cuál es tu propuesta de valor única? ¿Qué te diferencia?": "value_proposal",
+            "Describe tus productos o servicios principales y a qué clientes están dirigidos.": "products_services"
         }
         
         # Initialize question status
@@ -159,7 +173,7 @@ class BusinessChatService:
             
             initial_assistant_message = {
                 "role": "assistant",
-                "content": "¡Hola! Soy tu asistente para la validación de ideas de negocio. Vamos a trabajar juntos para entender y validar tu idea a través de un proceso de 3 etapas: Entendimiento del negocio, Necesidad de comunicación y Estrategia de comunicación.\n\nComencemos con la primera etapa: Entendimiento del negocio."
+                "content": "¡Hola! Soy tu asistente para validar tu idea de negocio. Vamos a trabajar juntos para entender y estructurar tu idea a través de un proceso de 3 etapas. Empecemos con algunas preguntas básicas sobre tu negocio."
             }
             
             # Initialize a fresh status
@@ -192,36 +206,35 @@ class BusinessChatService:
         return """Eres un asistente experto en validación de ideas de negocio. Tu tarea es guiar al usuario
 a través de un proceso de 3 etapas para entender y validar su idea de negocio:
 
-ETAPA 1: ENTENDIMIENTO DEL NEGOCIO (Brief de diagnóstico)
-- ¿Qué hace la empresa? ¿Cuál es su propósito?
+ETAPA 1: ENTENDIMIENTO DEL NEGOCIO
+- ¿Qué hace la empresa y cuál es su propósito?
 - ¿Cuál es su propuesta de valor?
 - ¿Qué productos/servicios ofrece y a quiénes?
-- ¿Cuál es el cliente ideal?
+- ¿Quién es su cliente ideal?
 - ¿Qué problema resuelve?
-- ¿Qué los hace diferentes frente a la competencia?
-- ¿Qué desafíos u oportunidades clave enfrentan hoy?
 
 ETAPA 2: NECESIDAD / OPORTUNIDAD DE COMUNICACIÓN
-- ¿Qué está ocurriendo alrededor del negocio o mercado que hace necesaria esta comunicación?
+- ¿Qué tendencias de mercado hacen necesaria esta comunicación?
 - ¿Cuál es la oportunidad de negocio concreta?
-- ¿Qué objetivo tiene esta comunicación (posicionamiento, lanzamiento, awareness, conversión, etc.)?
+- ¿Qué objetivos tiene esta comunicación?
 
 ETAPA 3: ESTRATEGIA DE COMUNICACIÓN
-- El mensaje central: ¿Cuál es la idea o mensaje clave a comunicar?
-- Audiencia: ¿A quién va dirigida esta comunicación? ¿Qué valores o características tiene esta audiencia?
-- Credibilidad y tono: ¿Por qué nos creerían? ¿Qué hace nuestra promesa creíble? ¿Cómo vamos a sonar?
-- Objetivos y éxito: ¿Cuál es el indicador de éxito? ¿Qué resultados esperamos?
-- Efecto deseado: ¿Qué queremos que la audiencia piense, sienta o haga?
-- Consideraciones: ¿Hay limitaciones legales, presupuestarias o de formatos? ¿Canales? ¿Fechas clave?
+- Mensaje central: ¿Cuál es la idea clave?
+- Audiencia: ¿A quién va dirigida?
+- Credibilidad: ¿Por qué te creerían?
+- Tono: ¿Cómo vas a comunicar?
+- Métricas: ¿Cómo medirás el éxito?
+- Acción deseada: ¿Qué quieres que haga tu audiencia?
+- Limitaciones: ¿Qué restricciones existen?
 
 Instrucciones importantes:
-1. Haz una pregunta a la vez, no bombardees al usuario con muchas preguntas a la vez.
-2. Mantén un tono conversacional, amigable y profesional.
-3. Si el usuario ya ha proporcionado información relevante a una pregunta, considera esa pregunta respondida.
-4. No sigas un guión rígido - adapta las preguntas según lo que el usuario ya haya compartido.
-5. Cuando una etapa esté completa, resume lo aprendido antes de pasar a la siguiente etapa.
-6. Profundiza cuando sea necesario para obtener respuestas de calidad.
-7. Si el usuario se desvía del tema, guíalo de vuelta amablemente."""
+1. Haz preguntas CONCISAS y directas, una a la vez.
+2. Mantén un tono conversacional y profesional.
+3. Adapta las preguntas según lo que el usuario ya haya compartido.
+4. Resume al finalizar cada etapa antes de pasar a la siguiente.
+5. Busca respuestas específicas y evita información vaga.
+6. Si una respuesta no es clara o completa, profundiza con una pregunta de seguimiento.
+7. Guía amablemente al usuario si se desvía del tema."""
     
     def _get_next_question(self, status: BusinessChatStatus) -> Optional[str]:
         """
@@ -236,61 +249,50 @@ Instrucciones importantes:
         current_stage = status.stage
         
         # Check if we need to move to the next stage
-        all_questions_answered_in_stage = True
-        for q_id, q_info in self.all_questions_by_id.items():
-            if q_info["stage"] == current_stage and not q_info["answered"]:
-                all_questions_answered_in_stage = False
-                next_question_id = q_id
-                break
-        
-        # Move to next stage if all questions in current stage are answered
-        if all_questions_answered_in_stage:
-            if current_stage == Stage.BUSINESS_UNDERSTANDING:
-                status.stage = Stage.COMMUNICATION_NEEDS
-                return "Excelente, hemos completado la primera etapa de entendimiento del negocio. Ahora, vamos a la segunda etapa para entender la necesidad u oportunidad de comunicación.\n\n¿Qué está ocurriendo alrededor del negocio o mercado que hace necesaria esta comunicación?"
+        if current_stage == Stage.COMPLETED:
+            return None
             
-            elif current_stage == Stage.COMMUNICATION_NEEDS:
-                status.stage = Stage.COMMUNICATION_STRATEGY
-                return "Perfecto, hemos completado la segunda etapa. Ahora, vamos a la tercera etapa para definir la estrategia de comunicación.\n\n¿Cuál es la idea o mensaje clave a comunicar?"
-            
-            elif current_stage == Stage.COMMUNICATION_STRATEGY:
-                status.stage = Stage.COMPLETED
-                return "¡Felicitaciones! Hemos completado todas las etapas de validación. Ahora tengo suficiente información para generar un reporte completo sobre tu idea de negocio. ¿Te gustaría ver un resumen de todo lo que hemos discutido?"
-            
-            else:  # COMPLETED
-                return None
+        # Get questions for the current stage
+        stage_questions = self.questions.get(current_stage, [])
         
-        # Get next unanswered question in current stage
-        for q_id, q_info in self.all_questions_by_id.items():
-            if q_info["stage"] == current_stage and not q_info["answered"]:
-                status.current_question = q_id
-                return q_info["question"]
-        
+        # Find the first unanswered question in this stage
+        for question in stage_questions:
+            if question not in status.questions_answered or not status.questions_answered[question]:
+                return question
+                
+        # If all questions in this stage are answered, move to the next stage
+        if current_stage == Stage.BUSINESS_UNDERSTANDING:
+            next_stage = Stage.COMMUNICATION_NEEDS
+        elif current_stage == Stage.COMMUNICATION_NEEDS:
+            next_stage = Stage.COMMUNICATION_STRATEGY
+        elif current_stage == Stage.COMMUNICATION_STRATEGY:
+            next_stage = Stage.COMPLETED
+            return None
+        else:
+            return None
+            
+        # Get the first question of the next stage
+        if next_stage in self.questions and self.questions[next_stage]:
+            return self.questions[next_stage][0]
+            
         return None
     
-    async def process_user_message(
-        self, 
-        session_id: str, 
-        user_message: str
-    ) -> Dict[str, Any]:
+    async def process_user_message(self, session_id: str, user_message: str) -> Dict[str, Any]:
         """
-        Process a user message and generate a response
+        Process a user message in the chat
         
         Args:
-            session_id: ID of the chat session
-            user_message: User's message
+            session_id: Chat session ID
+            user_message: User's message text
             
         Returns:
-            Dictionary with assistant response and updated status
+            Dictionary with AI response and updated status
         """
-        # Get current session
+        # Get the current session
         session = await self.redis.get_session(session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found")
-        
-        # Add user message to the conversation
-        await self.redis.add_message(session_id, "user", user_message)
-        
+            
         # Get current status
         status = BusinessChatStatus()
         if 'status' in session.metadata:
@@ -298,181 +300,218 @@ Instrucciones importantes:
                 status = BusinessChatStatus(**session.metadata['status'])
             except Exception as e:
                 logger.error(f"Error parsing status: {e}")
+                
+        # Identify the current question being answered
+        current_question = status.current_question or self._get_next_question(status)
         
-        # Update status based on user message
-        if status.current_question:
-            q_info = self.all_questions_by_id.get(status.current_question)
-            if q_info:
-                q_info["answered"] = True
-                q_info["answer"] = user_message
-                status.questions_answered[status.current_question] = True
+        if not current_question and status.stage != Stage.COMPLETED:
+            # If there's no current question but we're not done, move to the next stage
+            new_stage = None
+            if status.stage == Stage.BUSINESS_UNDERSTANDING:
+                new_stage = Stage.COMMUNICATION_NEEDS
+            elif status.stage == Stage.COMMUNICATION_NEEDS:
+                new_stage = Stage.COMMUNICATION_STRATEGY
+            elif status.stage == Stage.COMMUNICATION_STRATEGY:
+                new_stage = Stage.COMPLETED
                 
-                # Calculate progress
-                self._update_progress(status)
-                
-                # Store answer in results
-                if status.stage not in status.results:
-                    status.results[status.stage] = {}
-                
-                status.results[status.stage][q_info["question"]] = user_message
+            if new_stage:
+                status.stage = new_stage
+                if new_stage != Stage.COMPLETED:
+                    current_question = self._get_next_question(status)
+                    
+        # Add user message to session
+        await self.redis.add_message(session_id, {"role": "user", "content": user_message})
         
+        # Update business data if the question maps to a field in the business model
+        if current_question and current_question in self.field_mappings and self.business_crud and self.db:
+            field_name = self.field_mappings[current_question]
+            await self._update_business_field(field_name, user_message)
+            
+        # Mark question as answered and update chat data
+        if current_question:
+            status.questions_answered[current_question] = True
+            
+            # Aggregate chat data for the business
+            if self.business_crud and self.db:
+                business = self.business_crud.get(self.db, id=self.business_id)
+                if business:
+                    chat_data = business.chat_data or {}
+                    # Store the answer under a key based on the question
+                    question_key = current_question.replace("¿", "").replace("?", "").strip().lower()
+                    question_key = '_'.join(question_key.split()[:5])  # Take first 5 words
+                    chat_data[question_key] = user_message
+                    
+                    business.chat_data = chat_data
+                    self.db.commit()
+            
         # Generate AI response
-        history = await self.redis.get_conversation_history(session_id)
-        response = await self._generate_ai_response(history, status)
+        ai_response = await self._generate_ai_response(session_id, status, current_question)
         
-        # Add AI response to the conversation
-        await self.redis.add_message(session_id, "assistant", response)
+        # Update progress
+        await self._update_progress(status)
         
-        # Update next question
+        # Get the next question
         next_question = self._get_next_question(status)
-        if next_question:
-            status.current_question = next_question
+        status.current_question = next_question
         
-        # Update session metadata with new status
-        await self.redis.update_session_metadata(
-            session_id, 
-            {"status": status.model_dump()}
-        )
+        # Update session metadata
+        await self.redis.update_session_metadata(session_id, {"status": status.model_dump()})
         
         return {
-            "response": response,
-            "status": status.model_dump(),
-            "next_question": next_question
+            "response": ai_response,
+            "next_question": next_question,
+            "status": status.model_dump()
         }
-    
-    def _update_progress(self, status: BusinessChatStatus) -> None:
-        """
-        Update progress percentages based on answered questions
         
-        Args:
-            status: Current BusinessChatStatus to update
-        """
-        # Count questions by stage
-        stage_questions = {}
-        for stage in Stage:
-            if stage == Stage.COMPLETED:
-                continue
-            stage_questions[stage] = 0
-        
-        # Count answered questions by stage
-        stage_answered = {}
-        for stage in Stage:
-            if stage == Stage.COMPLETED:
-                continue
-            stage_answered[stage] = 0
-        
-        # Count total questions and answered questions
-        total_questions = 0
-        total_answered = 0
-        
-        for q_id, q_info in self.all_questions_by_id.items():
-            stage = q_info["stage"]
-            if stage == Stage.COMPLETED:
-                continue
-                
-            stage_questions[stage] += 1
-            total_questions += 1
-            
-            if q_info["answered"]:
-                stage_answered[stage] += 1
-                total_answered += 1
-        
-        # Calculate progress percentages
-        for stage in Stage:
-            if stage == Stage.COMPLETED:
-                continue
-                
-            if stage_questions[stage] > 0:
-                status.stage_progress[stage] = stage_answered[stage] / stage_questions[stage]
-        
-        # Overall progress
-        if total_questions > 0:
-            status.progress = total_answered / total_questions
-    
-    async def _generate_ai_response(
-        self, 
-        conversation_history: List[Dict[str, str]],
-        status: BusinessChatStatus
-    ) -> str:
+    async def _generate_ai_response(self, session_id: str, status: BusinessChatStatus, current_question: Optional[str]) -> str:
         """
         Generate an AI response based on the conversation history
         
         Args:
-            conversation_history: List of conversation messages
-            status: Current BusinessChatStatus
+            session_id: Chat session ID
+            status: Current business chat status
+            current_question: The question being answered
             
         Returns:
             AI response text
         """
-        # Prepare messages for LLM
-        messages = []
+        # Get session messages
+        session = await self.redis.get_session(session_id)
+        messages = session.messages if session else []
         
-        # Add system prompt
-        messages.append({
-            "role": "system",
-            "content": self._get_system_prompt()
-        })
+        # Add a hint about the current stage and progress
+        hint = ""
+        if status.stage != Stage.COMPLETED:
+            if current_question:
+                # The question was just answered
+                answered_count = sum(1 for q in self.questions[status.stage] if q in status.questions_answered and status.questions_answered[q])
+                total_count = len(self.questions[status.stage])
+                hint = f"\n\nEl usuario acaba de responder a la pregunta: '{current_question}'. "
+                hint += f"Ha completado {answered_count} de {total_count} preguntas en la etapa '{status.stage}'."
+                
+                if status.stage == Stage.BUSINESS_UNDERSTANDING and answered_count == total_count:
+                    hint += "\nDebe pasar a la siguiente etapa (COMMUNICATION_NEEDS) con un breve resumen de lo aprendido hasta ahora."
+                elif status.stage == Stage.COMMUNICATION_NEEDS and answered_count == total_count:
+                    hint += "\nDebe pasar a la siguiente etapa (COMMUNICATION_STRATEGY) con un breve resumen de lo aprendido hasta ahora."
+                elif status.stage == Stage.COMMUNICATION_STRATEGY and answered_count == total_count:
+                    hint += "\nDebe finalizar el proceso con un breve resumen general de toda la validación."
+        else:
+            hint = "\n\nEl proceso de validación ha sido completado. Proporcione un resumen final de la idea de negocio."
         
-        # Add conversation history (excluding system messages)
-        for msg in conversation_history:
-            if msg["role"] != "system":
-                messages.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
-                })
+        # Add this hint to the system message
+        if messages and messages[0]["role"] == "system":
+            messages[0]["content"] += hint
         
-        # Add status information to help guide the response
-        messages.append({
-            "role": "system",
-            "content": f"""
-            Current status:
-            - Stage: {status.stage}
-            - Current question: {self.all_questions_by_id.get(status.current_question, {}).get('question') if status.current_question else 'None'}
-            - Progress: {status.progress * 100:.1f}%
+        # Generate response
+        if self.config.llm_provider in ["openai", "claude"]:
+            completion = await self.llm_client.chat.completions.create(
+                model=self.llm_model,
+                messages=messages,
+                temperature=0.7,
+                top_p=0.9,
+                max_tokens=500
+            )
             
-            Please respond to the user's last message. If appropriate, guide them to the next question:
-            {self._get_next_question(status) or 'No more questions, summarize findings.'}
-            """
-        })
+            response_text = completion.choices[0].message.content
+        elif self.config.llm_provider == "deepseek":
+            # DeepSeek API
+            completion = await self.llm_client.chat.completions.create(
+                model=self.llm_model,
+                messages=messages,
+                temperature=0.7,
+                top_p=0.9,
+                max_tokens=500
+            )
+            
+            response_text = completion.choices[0].message.content
+        else:
+            response_text = "Lo siento, el proveedor de LLM no está configurado correctamente."
         
+        # Add AI message to session
+        await self.redis.add_message(session_id, {"role": "assistant", "content": response_text})
+        
+        return response_text
+    
+    async def _update_progress(self, status: BusinessChatStatus):
+        """
+        Update progress metrics in the status
+        
+        Args:
+            status: Current BusinessChatStatus to update
+        """
+        # Calculate stage progress
+        for stage in Stage:
+            if stage == Stage.COMPLETED:
+                continue
+                
+            stage_questions = self.questions.get(stage, [])
+            if not stage_questions:
+                status.stage_progress[stage] = 0.0
+                continue
+                
+            answered_count = sum(1 for q in stage_questions if q in status.questions_answered and status.questions_answered[q])
+            status.stage_progress[stage] = answered_count / len(stage_questions)
+        
+        # Calculate overall progress (weighted by stage)
+        weights = {
+            Stage.BUSINESS_UNDERSTANDING: 0.4,
+            Stage.COMMUNICATION_NEEDS: 0.3,
+            Stage.COMMUNICATION_STRATEGY: 0.3
+        }
+        
+        total_progress = sum(status.stage_progress[stage] * weights[stage] for stage in weights)
+        
+        status.progress = total_progress
+        
+        # Update stage if complete
+        if status.stage != Stage.COMPLETED:
+            if status.stage_progress[status.stage] >= 1.0:
+                # Move to next stage
+                if status.stage == Stage.BUSINESS_UNDERSTANDING:
+                    status.stage = Stage.COMMUNICATION_NEEDS
+                elif status.stage == Stage.COMMUNICATION_NEEDS:
+                    status.stage = Stage.COMMUNICATION_STRATEGY
+                elif status.stage == Stage.COMMUNICATION_STRATEGY:
+                    status.stage = Stage.COMPLETED
+    
+    async def _update_business_field(self, field_name: str, value: str):
+        """
+        Update a field in the BusinessIdea model
+        
+        Args:
+            field_name: Field name to update
+            value: New value for the field
+        """
+        if not self.business_crud or not self.db:
+            return
+            
         try:
-            # Call the LLM
-            if self.config.llm_provider in ["openai", "claude"]:
-                response = self.llm_client.chat.completions.create(
-                    model=self.llm_model,
-                    messages=messages,
-                    temperature=0.7
-                )
-                return response.choices[0].message.content
-            elif self.config.llm_provider == "deepseek":
-                response = self.llm_client.chat.completions.create(
-                    model=self.llm_model,
-                    messages=messages,
-                    temperature=0.7
-                )
-                return response.choices[0].message.content
-            else:
-                raise ValueError(f"Unsupported LLM provider: {self.config.llm_provider}")
+            business = self.business_crud.get(self.db, id=self.business_id)
+            if not business:
+                return
+                
+            setattr(business, field_name, value)
+            self.db.commit()
+            logger.info(f"Updated business field {field_name} for business {self.business_id}")
         except Exception as e:
-            logger.error(f"Error generating AI response: {e}")
-            return "Lo siento, tuve un problema al generar una respuesta. ¿Podrías reformular tu pregunta?"
+            logger.error(f"Error updating business field: {e}")
     
     async def generate_summary(self, session_id: str) -> Dict[str, Any]:
         """
-        Generate a summary of the business understanding process
+        Generate a summary of the business validation chat
         
         Args:
-            session_id: ID of the chat session
+            session_id: Chat session ID
             
         Returns:
-            Dictionary with summary data
+            Dictionary with summary text and data
         """
-        # Get current session
+        # Get session
         session = await self.redis.get_session(session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found")
-        
-        # Get current status
+            
+        # Get status
         status = BusinessChatStatus()
         if 'status' in session.metadata:
             try:
@@ -480,77 +519,105 @@ Instrucciones importantes:
             except Exception as e:
                 logger.error(f"Error parsing status: {e}")
         
-        # Prepare the data for the summary
-        summary_data = {
-            "business_understanding": status.results.get(Stage.BUSINESS_UNDERSTANDING, {}),
-            "communication_needs": status.results.get(Stage.COMMUNICATION_NEEDS, {}),
-            "communication_strategy": status.results.get(Stage.COMMUNICATION_STRATEGY, {})
-        }
+        # Get all messages
+        messages = session.messages if session else []
         
-        # Generate a conversational summary using the LLM
-        summary_prompt = f"""
-        Basado en la información recopilada en nuestra conversación sobre este negocio, 
-        por favor genera un resumen estructurado que abarque las tres etapas del proceso:
-        
-        1. ENTENDIMIENTO DEL NEGOCIO
-        {json.dumps(summary_data['business_understanding'], indent=2, ensure_ascii=False)}
-        
-        2. NECESIDAD / OPORTUNIDAD DE COMUNICACIÓN
-        {json.dumps(summary_data['communication_needs'], indent=2, ensure_ascii=False)}
-        
-        3. ESTRATEGIA DE COMUNICACIÓN
-        {json.dumps(summary_data['communication_strategy'], indent=2, ensure_ascii=False)}
-        
-        Genera un resumen conversacional que destaque los puntos más importantes de cada etapa,
-        las fortalezas del negocio, las oportunidades clave y recomendaciones estratégicas.
-        Utiliza un tono profesional pero amigable, y estructura la información de manera clara.
-        """
-        
-        try:
-            # Call the LLM
-            if self.config.llm_provider in ["openai", "claude"]:
-                response = self.llm_client.chat.completions.create(
-                    model=self.llm_model,
-                    messages=[
-                        {"role": "system", "content": "Eres un consultor de negocios experto que genera resúmenes claros y profesionales."},
-                        {"role": "user", "content": summary_prompt}
-                    ],
-                    temperature=0.7
-                )
-                conversational_summary = response.choices[0].message.content
-            elif self.config.llm_provider == "deepseek":
-                response = self.llm_client.chat.completions.create(
-                    model=self.llm_model,
-                    messages=[
-                        {"role": "system", "content": "Eres un consultor de negocios experto que genera resúmenes claros y profesionales."},
-                        {"role": "user", "content": summary_prompt}
-                    ],
-                    temperature=0.7
-                )
-                conversational_summary = response.choices[0].message.content
-            else:
-                raise ValueError(f"Unsupported LLM provider: {self.config.llm_provider}")
+        # Extract user responses only
+        user_responses = {}
+        for question in self.all_questions_by_id.values():
+            question_text = question["question"]
+            stage = question["stage"]
             
-            # Add to conversation
-            await self.redis.add_message(session_id, "assistant", conversational_summary)
+            if question_text in status.questions_answered and status.questions_answered[question_text]:
+                # Find the user response for this question
+                for i, msg in enumerate(messages):
+                    if msg["role"] == "assistant" and question_text in msg["content"]:
+                        # User response should be the next message
+                        if i+1 < len(messages) and messages[i+1]["role"] == "user":
+                            user_responses[question_text] = {
+                                "stage": stage,
+                                "answer": messages[i+1]["content"]
+                            }
+                            break
+        
+        # Generate summary prompt
+        summary_prompt = [
+            {"role": "system", "content": """Eres un consultor de negocios experto. Necesito que generes un resumen ejecutivo 
+            de la validación de una idea de negocio basándote en las respuestas proporcionadas por el usuario a las siguientes 
+            preguntas organizadas por etapas. El resumen debe ser conciso, específico y útil para el emprendedor, destacando 
+            puntos fuertes, oportunidades y posibles desafíos identificados durante la validación. Estructura tu resumen por 
+            secciones correspondientes a las etapas del proceso."""},
+            {"role": "user", "content": "A continuación están las respuestas del usuario organizadas por etapas:"}
+        ]
+        
+        # Add user responses by stage
+        for stage in Stage:
+            if stage == Stage.COMPLETED:
+                continue
+                
+            stage_prompt = f"\n\nETAPA: {stage}\n"
+            has_responses = False
             
-            # Update status to indicate completion
-            status.stage = Stage.COMPLETED
-            await self.redis.update_session_metadata(
-                session_id, 
-                {"status": status.model_dump(), "summary": conversational_summary}
+            for question, response in user_responses.items():
+                if response["stage"] == stage:
+                    stage_prompt += f"Pregunta: {question}\nRespuesta: {response['answer']}\n\n"
+                    has_responses = True
+            
+            if has_responses:
+                summary_prompt[-1]["content"] += stage_prompt
+        
+        summary_prompt[-1]["content"] += "\nPor favor, genera un resumen ejecutivo basado en estas respuestas, destacando los puntos clave de la validación del negocio y posibles recomendaciones."
+        
+        # Generate summary
+        if self.config.llm_provider in ["openai", "claude"]:
+            completion = await self.llm_client.chat.completions.create(
+                model=self.llm_model,
+                messages=summary_prompt,
+                temperature=0.7,
+                top_p=0.9,
+                max_tokens=1000
             )
             
-            return {
-                "summary": conversational_summary,
-                "data": summary_data,
-                "status": status.model_dump()
-            }
+            summary_text = completion.choices[0].message.content
+        elif self.config.llm_provider == "deepseek":
+            # DeepSeek API
+            completion = await self.llm_client.chat.completions.create(
+                model=self.llm_model,
+                messages=summary_prompt,
+                temperature=0.7,
+                top_p=0.9,
+                max_tokens=1000
+            )
             
-        except Exception as e:
-            logger.error(f"Error generating summary: {e}")
-            return {
-                "summary": "Lo siento, tuve un problema al generar el resumen.",
-                "data": summary_data,
-                "status": status.model_dump()
-            } 
+            summary_text = completion.choices[0].message.content
+        else:
+            summary_text = "Lo siento, el proveedor de LLM no está configurado correctamente."
+        
+        # Update business with summary if possible
+        if self.business_crud and self.db:
+            try:
+                business = self.business_crud.get(self.db, id=self.business_id)
+                if business:
+                    # Save the summary in chat_data
+                    chat_data = business.chat_data or {}
+                    chat_data["validation_summary"] = summary_text
+                    business.chat_data = chat_data
+                    
+                    # Mark as validated
+                    business.is_validated = True
+                    
+                    self.db.commit()
+                    logger.info(f"Updated business with validation summary for business {self.business_id}")
+            except Exception as e:
+                logger.error(f"Error updating business with summary: {e}")
+        
+        # Update session metadata to mark as completed
+        status.stage = Stage.COMPLETED
+        status.progress = 1.0
+        await self.redis.update_session_metadata(session_id, {"status": status.model_dump()})
+        
+        return {
+            "summary": summary_text,
+            "data": user_responses,
+            "status": status.model_dump()
+        } 

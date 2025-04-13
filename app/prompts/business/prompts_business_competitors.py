@@ -329,3 +329,66 @@ def create_cleaning_prompt(lang, questions: List[str]) -> str:
         
         Questions: {json.dumps(questions)}
         """
+
+# Prompt to validate using web research information of a competitor having a title, description and a posible website
+def create_validation_competitor_prompt(lang, competitor_info: Dict) -> str:
+    if lang == 'es':
+        return f"""
+        Tienes la tarea de validar/buscar la información de una empresa/startup teniendo un nombre, descripción y un posible sitio web.
+
+        Nombre del competidor: {competitor_info['full_name']}
+
+        Descripción del competidor: {competitor_info['description']}
+
+        URL del sitio web: {competitor_info['website']}
+
+        Usando la información de la web, valida si la información de la url del sitio web es correcta.
+
+        Además, en base a la información de la web, busca y proporciona las URLs de las redes sociales de la empresa.
+
+        Devuelve únicamente un JSON con la siguiente estructura:
+
+        """ + """
+        {
+            "full_name": "string", # Competitor's Full Name
+            "key_feature": "string", # Competitor's Key Feature (Value Proposition)
+            "website": "url", # Competitor's Website URL
+            "instagram_url": "handle", # Instagram handle (if available)
+            "facebook_url": "handle", # Facebook handle (if available)
+            "linkedin_url": "handle", # LinkedIn URL (if available)
+            "x_url": "handle", # Twitter/X handle (if available)
+            "youtube_url": "handle", # YouTube channel (if available)
+            "tiktok_url": "handle", # TikTok handle (if available)
+            "similarity_score": 1-100 # Similarity score with the business idea
+        }
+        """
+    else:
+        return f"""
+        You have the task to validate/search the information of a company/startup having a name, description and a possible website.
+
+        Competitor name: {competitor_info['full_name']}
+
+        Competitor description: {competitor_info['description']}
+
+        Website URL: {competitor_info['website']}
+
+        Using the website information, validate if the website url information is correct.
+
+        Also, based on the website information, it fetches and provides the URLs of the company's social networks.
+
+        It returns only a JSON with the following structure:
+
+        """ + """
+        {
+        "full_name": "string", # Competitor's Full Name
+        "key_feature": "string", # Competitor's Key Feature (Value Proposition)
+        "website": "url", # Competitor's Website URL
+        "instagram_url": "handle", # Instagram handle (if available)
+        "facebook_url": "handle", # Facebook handle (if available)
+        "linkedin_url": "handle", # LinkedIn URL (if available)
+        "x_url": "handle", # Twitter/X handle (if available)
+        "youtube_url": "handle", # YouTube channel (if available)
+        "tiktok_url": "handle", # TikTok handle (if available)
+        "similarity_score": 1-100 # Similarity score with the business idea
+        }
+        """

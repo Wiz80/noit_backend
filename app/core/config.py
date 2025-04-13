@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
 import os
 from dotenv import load_dotenv
+from typing import Optional
 
 load_dotenv()
 
@@ -25,6 +26,12 @@ class Settings(BaseSettings):
     MINIO_ROOT_PASSWORD: str = os.getenv("MINIO_ROOT_PASSWORD")
     MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT")
     MINIO_REGION: str = os.getenv("MINIO_REGION")
+    
+    # Redis
+    REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")
+    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
+    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
 
     SQLALCHEMY_DATABASE_URI: str | None = None
     

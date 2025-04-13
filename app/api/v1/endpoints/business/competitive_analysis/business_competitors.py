@@ -5,71 +5,46 @@ import json
 import logging
 from fastapi.responses import JSONResponse
 import uuid
+from uuid import UUID
 import datetime
 import httpx
+from pydantic import BaseModel
 
 from app.services.storage.minio_service import MinioService
 from app.services.business.competitive_analysis.business_competitors_extraction import EnhancedBusinessAnalyzer, CompetitorInfo, BusinessModel
+from app.controllers.competitive_analysis.business_competitor_controller import BusinessCompetitorController
+from app.controllers.competitive_analysis.website_extraction_controller import WebsiteExtractionController
 from app.core.config import settings
 
 from app.models.business.business_idea import BusinessIdea
 from app.models.business.competitive_analysis.business_competitor import CompetitorResearch, CompetitorResearchStatus
+from app.models.business.competitive_analysis.competitors import Competitor
 
 from app.schemas.business.business_competitors import CompetitorAnalysisRequest, CompetitorAnalysisCallback
 from sqlalchemy.orm import Session
 
 from app.utils.decode_json import clean_json_encoding
 
+# Schema for website social media scraping request
+class WebsiteSocialMediaScrapingRequest(BaseModel):
+    update_db: bool = True
+    competitor_ids: Optional[List[str]] = None
+
+# Schema for website social media scraping response
+class WebsiteSocialMediaScrapingResponse(BaseModel):
+    task_id: str
+    status: str
+    results: Optional[dict]
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Simple cache to store task progress
+# In production, you should use Redis or similar
+analysis_progress = {}
+
 router = APIRouter()
-
-
-async def run_competitor_analysis(
-    minio_service: MinioService,
-    business_model_data: dict,
-    business_model_id: str,
-    request: CompetitorAnalysisRequest
-) -> dict:
-    """Execute competitor analysis using the business model data"""
-    try:
-        # Create business analyzer instance
-        analyzer = EnhancedBusinessAnalyzer(
-            business_model=BusinessModel(**business_model_data),
-            lang=request.language,
-            validator_provider=request.validator_provider,
-            validator_model=request.validator_model
-        )
-
-        # Generate competitor analysis questions
-        questions = analyzer.generate_competitor_questions()
-
-        # Research competitors
-        competitors = await analyzer.research_competitors(
-            prompt_search=request.search_prompt
-        )
-
-        # Store results in MinIO
-        results = {
-            "competitors": competitors,
-            "analysis_questions": questions,
-            "business_model_summary": business_model_data
-        }
-
-        # Save results to MinIO
-        results_filename = f"analysis_results_{business_model_id}.json"
-        await minio_service.upload_json(results_filename, results)
-
-        return results
-
-    except Exception as e:
-        logger.error(f"Error in competitor analysis: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error executing competitor analysis: {str(e)}"
-        )
 
 @router.post("/{business_id}")
 async def analyze_competitors(
@@ -113,13 +88,7 @@ async def analyze_competitors(
 
         business_idea_text = f"""
         {business_idea.title}:
-        
-        MISIÓN:
-        {business_idea.mission}
-        
-        VISIÓN:
-        {business_idea.vision}
-        
+
         DESCRIPCIÓN:
         {business_idea.description}
         """
@@ -180,23 +149,19 @@ async def analyze_competitors(
             except Exception as e:
                 logger.warning(f"Error loading existing questions, will regenerate: {str(e)}")
                 questions = None
+        
+        # Initialize the competitor analysis controller
+        controller = BusinessCompetitorController(business_id=business_id)
                 
-        # Execute analysis in background
-        analyzer = EnhancedBusinessAnalyzer(
-            business_model=business_model,
-            lang=request.language,
-            validator_provider=request.validator_provider,
-            validator_model=request.validator_model,
-            max_depth=1,
-            research_model=request.research_model,
-            db=db
-        )
-
         # If we don't have questions, generate them and save to MinIO
         if not questions:
             logger.info(f"Generating new competitor questions for business {business_id}")
-            # Generate competitor analysis questions
-            questions = analyzer.generate_competitor_questions()
+            # Generate competitor analysis questions using controller
+            # Pass the proper parameters to the controller method
+            questions = await controller.generate_competitor_questions(
+                business_model=business_model,
+                lang=request.language
+            )
             
             # Save questions to MinIO for future use
             questions_data = {
@@ -254,11 +219,19 @@ async def analyze_competitors(
         
         # Add the research task to background_tasks to run after responding to the client
         # This way we don't block the response while the research is being started
-        background_tasks.add_task(
-            analyzer.research_competitors_async,
-            prompt_search=json.dumps(modified_prompt),
+        # background_tasks.add_task(
+        #     controller.research_competitors_async,
+        #     prompt_search=json.dumps(modified_prompt),
+        #     business_id=business_id,
+        #     request_id=request_id
+        # )
+
+        await controller.research_competitors_async(
+            prompt_search=modified_prompt,
             business_id=business_id,
-            request_id=request_id
+            request_id=request_id,
+            business_model=business_model,
+            lang=request.language
         )
         
         logger.info(f"Competitor analysis started as background task, request_id: {request_id}")
@@ -351,7 +324,10 @@ async def get_research_status(
         )
 
 @router.get("/business-models/{business_model_id}/analysis-results")
-async def get_analysis_results(business_model_id: str):
+async def get_analysis_results(
+    business_model_id: str,
+    db: Session = Depends(deps.get_db)
+):
     """
     Get the results of a previously executed competitor analysis
     
@@ -362,7 +338,7 @@ async def get_analysis_results(business_model_id: str):
         Analysis results if available
     """
     try:
-        minio_service = MinioService(bucket_name="business-models")
+        minio_service = MinioService(bucket_name="lattice-businesses")
         results_filename = f"analysis_results_{business_model_id}.json"
 
         if not minio_service.object_exists(results_filename):
@@ -430,3 +406,170 @@ async def list_researches(
                 "message": f"Error listing researches: {str(e)}"
             }
         )
+
+@router.post("/{business_id}/extract-social-media", response_model=WebsiteSocialMediaScrapingResponse)
+async def extract_social_media_from_websites(
+    business_id: UUID,
+    request: WebsiteSocialMediaScrapingRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Extract social media information from competitor websites using AI-powered scraping.
+    
+    Args:
+        business_id: UUID of the business idea
+        request: WebsiteSocialMediaScrapingRequest with optional competitor_ids list and update_db flag
+        background_tasks: FastAPI background tasks
+        db: Database session
+        
+    Returns:
+        WebsiteSocialMediaScrapingResponse: Task information and results
+    """
+    try:
+        # Verify if business_id exists
+        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
+            raise HTTPException(status_code=404, detail="Business idea not found")
+
+        # Get competitors based on request.competitor_ids (if provided) or all competitors
+        query = db.query(Competitor).filter(
+            Competitor.business_idea_id == str(business_id)
+        )
+        
+        # Filter by specific competitor IDs if provided
+        if request.competitor_ids:
+            query = query.filter(Competitor.id.in_(request.competitor_ids))
+            
+        competitors = query.all()
+
+        if not competitors:
+            raise HTTPException(status_code=404, detail="No competitors found with provided criteria")
+
+        # Check that competitors have websites
+        competitors_with_websites = [comp for comp in competitors if comp.website]
+        if not competitors_with_websites:
+            raise HTTPException(status_code=404, detail="None of the requested competitors have website URLs")
+
+        # Generate a unique task ID
+        task_id = str(uuid.uuid4())
+        
+        # Initialize progress
+        analysis_progress[task_id] = {
+            "progress": 0,
+            "status": "started",
+            "results": {},
+            "error": None
+        }
+
+        # Initialize controller
+        controller = WebsiteExtractionController(business_id=str(business_id))
+        
+        # Create a progress callback function
+        def update_progress(task_id, progress, status, results):
+            if task_id in analysis_progress:
+                analysis_progress[task_id].update({
+                    "progress": progress,
+                    "status": status,
+                    "results": results
+                })
+
+        # Run extraction here instead of in background
+        await async_extraction_wrapper(
+            controller=controller,
+            competitor_ids=[comp.id for comp in competitors_with_websites],
+            task_id=task_id,
+            update_db=request.update_db,
+            db=db,
+            progress_callback=update_progress
+        )
+
+        return WebsiteSocialMediaScrapingResponse(
+            task_id=task_id,
+            status="processing",
+            results=None
+        )
+
+    except Exception as e:
+        # If there was a task_id created, update its status
+        if 'task_id' in locals():
+            analysis_progress[task_id] = {
+                "status": "failed",
+                "error": str(e),
+                "progress": 0
+            }
+        
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{business_id}/social-media/task/{task_id}", response_model=WebsiteSocialMediaScrapingResponse)
+async def get_social_media_extraction_progress(
+    business_id: UUID,
+    task_id: str,
+    db: Session = Depends(deps.get_db)
+):
+    """
+    Get the progress of social media extraction for a specific task.
+    
+    Args:
+        business_id: UUID of the business idea
+        task_id: Task identifier
+        db: Database session
+        
+    Returns:
+        WebsiteSocialMediaScrapingResponse: Task progress information
+    """
+    if task_id not in analysis_progress:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    progress_data = analysis_progress[task_id]
+    
+    return WebsiteSocialMediaScrapingResponse(
+        task_id=task_id,
+        status=progress_data["status"],
+        results=progress_data.get("results")
+    )
+
+async def async_extraction_wrapper(
+    controller: WebsiteExtractionController,
+    competitor_ids: List[str],
+    task_id: str,
+    update_db: bool,
+    db: Session,
+    progress_callback: callable
+):
+    """
+    Wrapper function to handle the controller's async execution and finalize the results.
+    
+    Args:
+        controller: WebsiteExtractionController instance
+        competitor_ids: List of competitor IDs to process
+        task_id: Task identifier
+        update_db: Whether to update the database with the results
+        db: Database session
+        progress_callback: Callback function for progress updates
+    """
+    try:
+        # Run extraction and get final result
+        final_result = await controller.run_website_social_media_extraction(
+            competitor_ids=competitor_ids,
+            task_id=task_id,
+            update_db=update_db,
+            db=db,
+            progress_callback=progress_callback
+        )
+        
+        # Update final status in progress cache
+        if task_id in analysis_progress:
+            analysis_progress[task_id].update({
+                "progress": 100,
+                "status": final_result["status"],
+                "results": final_result["results"],
+                "error": final_result.get("error")
+            })
+            
+    except Exception as e:
+        # Update error status in progress cache
+        if task_id in analysis_progress:
+            analysis_progress[task_id].update({
+                "status": "failed",
+                "error": str(e)
+            })

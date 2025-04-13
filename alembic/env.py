@@ -15,12 +15,14 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from app.core.config import settings
 import app.models.user
 import app.models.business.business_idea
+import app.models.business.business_progress
 import app.models.business.business_understanding.business_model
 import app.models.business.business_understanding.business_canvas
 import app.models.business.business_understanding.state_of_art
 import app.models.business.competitive_analysis.competitors
 import app.models.business.competitive_analysis.instagram 
 import app.models.business.competitive_analysis.business_competitor
+
 from app.models.base import Base
 
 # this is the Alembic Config object, which provides

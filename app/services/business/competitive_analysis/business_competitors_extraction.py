@@ -721,7 +721,7 @@ class EnhancedBusinessAnalyzer:
 
     async def research_competitors_async(
         self,
-        prompt_search: str,
+        prompt_search: dict,
         business_id: str,
         request_id: str
     ) -> str:
@@ -756,9 +756,11 @@ class EnhancedBusinessAnalyzer:
             # Start the asynchronous research in a non-blocking way
             # We don't need to await this since we want to return immediately
             # Create a background task instead of awaiting
-            background_task = asyncio.create_task(
-                research_module.research(prompt_search)
-            )
+            # background_task = asyncio.create_task(
+            #     research_module.research(prompt_search)
+            # )
+
+            await research_module.research(prompt_search)
             
             # Log that we've started the task and will continue without waiting
             logger.info(f"Solicitud de investigación enviada, ID: {request_id}. Continuando sin esperar.")

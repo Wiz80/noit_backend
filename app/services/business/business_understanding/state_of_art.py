@@ -4,13 +4,16 @@ import asyncio
 import os
 from typing import Dict, List, Any, Optional
 import aisuite as ai
+from app.models.business.business_understanding.business_model import BusinessModel
 from openai import OpenAI
 from app.services.storage.minio_service import MinioService
 import app.prompts.business.prompts_state_of_art as prompts
 from app.services.search.dynamic_research_ai import ResearchModule, ResearchConfig
 from app.models.business.business_idea import BusinessIdea
+from app.models.business.business_understanding.business_model import BusinessModel
 from app.models.business.business_understanding.state_of_art import MarketStateOfArt, StatusEnum, ResearchTask, ResearchTypeEnum
 from sqlalchemy.orm import Session
+from datetime import datetime
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -28,12 +31,16 @@ class MarketStateOfArtService:
         language: str = "en",
         max_iterations: int = 1,
         temperature: float = 0.7,
-        depth: str = "normal"
+        depth: str = "normal",
+        model: str = "sonar",
+        base_url: str = None
     ):
         self.db = db_session
         self.minio = minio_client
         self.language = language
         self.depth = depth
+        self.model = model
+        self.base_url = base_url
         
         if llm_provider == "openai" or llm_provider == "claude":
             self.llm = ai.Client()
@@ -50,12 +57,13 @@ class MarketStateOfArtService:
             validator_model="openai:gpt-4o-mini",
             language=language,
             max_iterations=max_iterations,
-            temperature=temperature
+            temperature=temperature,
+            model=model
         )
         
         self.research_module = ResearchModule(self.research_config, model_validator="openai")
     
-    async def _get_business_idea(self, business_idea_id: str) -> BusinessIdea:
+    def _get_business_idea(self, business_idea_id: str) -> BusinessIdea:
         """Obtiene el business idea desde la base de datos"""
         logger.info(f"Querying database for business idea with ID: {business_idea_id}")
         business_idea = self.db.query(BusinessIdea).filter(
@@ -69,7 +77,7 @@ class MarketStateOfArtService:
         logger.info(f"Found business idea: {business_idea.title} (ID: {business_idea.id})")
         return business_idea
     
-    async def _get_or_create_business_understanding(
+    def _get_or_create_business_understanding(
         self, 
         business_idea_id: str
     ) -> MarketStateOfArt:
@@ -96,96 +104,363 @@ class MarketStateOfArtService:
         
     async def generate_market_research_questions(
         self, 
-        business_idea: BusinessIdea
+        business_idea: BusinessIdea,
+        business_model: BusinessModel,
+        force_regenerate: bool = False
     ) -> Dict[str, Any]:
         """Genera preguntas de investigación de mercado basadas en la idea de negocio"""
         logger.info(f"Generating market research questions for business idea: {business_idea.id} - {business_idea.title}")
-        content = f"""
-        Title: {business_idea.title}
-        Description: {business_idea.description}
-        Mission: {business_idea.mission or ''}
-        Vision: {business_idea.vision or ''}
-        """
         
-        system_prompt = prompts.get_market_research_prompt(language=self.language)
-        logger.info(f"Using language: {self.language} for market research prompt")
+        # IMPORTANTE: Primero verificar si ya existen preguntas en MinIO
+        questions_path = f"{business_idea.id}/business-understanding/market_research_questions.json"
+        logger.info(f"Checking for existing questions at path: {questions_path}")
         
-        try:
-            logger.info(f"Calling LLM with model: {self.llm_model} to generate market research questions")
-            response = self.llm.chat.completions.create(
-                model=self.llm_model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": content}
-                ],
-                temperature=0.3
-            )
+        # Variable para controlar el flujo y almacenar resultados
+        result = None
+        skip_generation = False
+        
+        # Check if questions already exist in MinIO and return them if not force_regenerate
+        if not force_regenerate:
+            try:
+                logger.info(f"Attempting to retrieve existing questions from MinIO")
+                existing_questions = self.minio.get_object_data(questions_path)
+                
+                if existing_questions:
+                    try:
+                        # Parsear el JSON y verificar que sea válido
+                        questions_data = json.loads(existing_questions)
+                        if questions_data and isinstance(questions_data, dict) and len(questions_data) > 0:
+                            logger.info(f"Found valid existing market research questions in MinIO with {len(questions_data)} categories")
+                            
+                            # Verificar si ya tiene la normalización de claves
+                            has_normalized_keys = any(key in questions_data for key in [
+                                "MarketSizeAndGrowth",
+                                "CompetitiveAnalysis",
+                                "TrendAnalysis",
+                                "TargetAudience",
+                                "PricingAnalysis",
+                                "MarketEntryStrategy"
+                            ])
+                            
+                            if has_normalized_keys:
+                                logger.info("Questions already have normalized keys, using as-is")
+                                return questions_data
+                            else:
+                                logger.info("Questions need key normalization, processing...")
+                                # Usar los datos existentes pero aplicar normalización
+                                result = questions_data
+                                skip_generation = True
+                    except json.JSONDecodeError:
+                        logger.warning(f"Found existing file but JSON is invalid, will regenerate questions")
+                else:
+                    logger.info("No existing questions found in MinIO")
+            except Exception as e:
+                logger.info(f"Error retrieving questions from MinIO: {str(e)}")
+                logger.info("Will proceed with generating new questions")
+        else:
+            logger.info("Force regenerate is enabled, will generate new questions regardless of existing data")
+        
+        # Si no saltamos la generación, necesitamos generar nuevas preguntas con LLM
+        if not skip_generation:
+            logger.info("Generating new market research questions")
             
-            logger.info("LLM response received for market research questions")
-            # Intentamos parsear el JSON de la respuesta
-            response_text = response.choices[0].message.content.strip()
+            try:
+                # Handle case where BusinessModel doesn't have to_dict method
+                try:
+                    business_model_data = business_model.to_dict()
+                except AttributeError:
+                    logger.warning("BusinessModel object doesn't have to_dict method, using __dict__ instead")
+                    # Create a dict with the model attributes
+                    business_model_data = {
+                        "id": business_model.id,
+                        "business_id": business_model.business_id,
+                        "problem_definition": getattr(business_model, "problem_definition", None),
+                        "industry": getattr(business_model, "industry", None),
+                        "competitors": getattr(business_model, "competitors", None),
+                        "customer_persona": getattr(business_model, "customer_persona", None),
+                        "value_proposition": getattr(business_model, "value_proposition", None),
+                        "competitive_advantage": getattr(business_model, "competitive_advantage", None),
+                        "key_metrics": getattr(business_model, "key_metrics", None),
+                        "key_resources": getattr(business_model, "key_resources", None),
+                        "additional_data": getattr(business_model, "additional_data", {})
+                    }
+                
+                # Use getattr with default values for potentially missing attributes
+                content = f"""
+                Title: {business_idea.title}
+                Description: {business_idea.description}
+                Mission: {getattr(business_idea, 'mission', '')}
+                Vision: {getattr(business_idea, 'vision', '')}
+                Business Model: {business_model_data}
+                """
+                
+                system_prompt = prompts.get_market_research_prompt(language=self.language)
+                logger.info(f"Using language: {self.language} for market research prompt")
+                
+                logger.info(f"Calling LLM with model: {self.llm_model} to generate market research questions")
+                response = self.llm.chat.completions.create(
+                    model=self.llm_model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": content}
+                    ],
+                    temperature=0.3
+                )
+                
+                logger.info("LLM response received for market research questions")
+                # Intentamos parsear el JSON de la respuesta
+                response_text = response.choices[0].message.content.strip()
+                
+                # Limpiar posibles marcadores de código
+                if response_text.startswith("```json"):
+                    logger.info("Cleaning JSON code markers from response")
+                    response_text = response_text.split("```json", 1)[1]
+                if response_text.endswith("```"):
+                    response_text = response_text.rsplit("```", 1)[0]
+                
+                response_text = response_text.strip()
+                
+                logger.info("Parsing JSON response for market research questions")
+                result = json.loads(response_text)
+                logger.info(f"Successfully generated market research questions with {len(result)} categories")
+                
+                # Save raw questions to MinIO before normalization
+                logger.info(f"Saving raw market research questions to MinIO at {questions_path}")
+                await self.minio.upload_content(
+                    object_name=questions_path,
+                    data=json.dumps(result, indent=2),
+                    content_type="application/json",
+                    metadata={
+                        "business_id": business_idea.id,
+                        "type": "market_research_questions",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+                logger.info("Raw market research questions saved to MinIO")
+                
+            except Exception as e:
+                logger.error(f"Error generating market research questions: {str(e)}", exc_info=True)
+                raise
+        
+        # Ahora procesamos el resultado para normalizarlo (ya sea de MinIO o generado)
+        if result:
+            logger.info("Normalizing question keys")
             
-            # Limpiar posibles marcadores de código
-            if response_text.startswith("```json"):
-                logger.info("Cleaning JSON code markers from response")
-                response_text = response_text.split("```json", 1)[1]
-            if response_text.endswith("```"):
-                response_text = response_text.rsplit("```", 1)[0]
+            # Normalize keys in case they don't match expected format
+            normalized_result = {}
+            expected_keys = [
+                "TamañoYCrecimientoDelMercado", "MarketSizeAndGrowth",
+                "AnálisisCompetitivo", "CompetitiveAnalysis",
+                "AnálisisDeTendencias", "TrendAnalysis",
+                "PúblicoObjetivo", "TargetAudience",
+                "AnálisisDePrecios", "PricingAnalysis",
+                "EstrategiaDeEntradaAlMercado", "MarketEntryStrategy"
+            ]
             
-            response_text = response_text.strip()
+            # Map Spanish keys to normalized keys
+            key_mapping = {
+                "TamañoYCrecimientoDelMercado": "MarketSizeAndGrowth",
+                "AnálisisCompetitivo": "CompetitiveAnalysis",
+                "AnálisisDeTendencias": "TrendAnalysis",
+                "PúblicoObjetivo": "TargetAudience",
+                "AnálisisDePrecios": "PricingAnalysis",
+                "EstrategiaDeEntradaAlMercado": "MarketEntryStrategy"
+            }
             
-            logger.info("Parsing JSON response for market research questions")
-            result = json.loads(response_text)
-            logger.info(f"Successfully generated market research questions with {len(result)} main categories")
-            return result
+            # Create a dictionary with normalized keys and data
+            for key, value in result.items():
+                normalized_key = key_mapping.get(key, key)
+                normalized_result[normalized_key] = value
             
-        except Exception as e:
-            logger.error(f"Error generating market research questions: {str(e)}", exc_info=True)
-            raise
+            # Ensure all expected keys are in the result
+            for key in expected_keys:
+                if key not in normalized_result:
+                    # Check if we have a matching key in the result
+                    found = False
+                    for result_key in result.keys():
+                        if result_key.lower().replace(" ", "") == key.lower().replace(" ", ""):
+                            normalized_result[key] = result[result_key]
+                            found = True
+                            break
+                    
+                    # If still not found, create an empty structure
+                    if not found and key in [
+                        "MarketSizeAndGrowth",
+                        "CompetitiveAnalysis",
+                        "TrendAnalysis",
+                        "TargetAudience",
+                        "PricingAnalysis",
+                        "MarketEntryStrategy"
+                    ]:
+                        normalized_result[key] = {
+                            "preguntasPrincipales": [],
+                            "fuentesSugeridas": []
+                        }
+            
+            # Save normalized data back to MinIO if it was generated from scratch
+            if not skip_generation:
+                normalized_path = f"{business_idea.id}/business-understanding/market_research_questions_normalized.json"
+                logger.info(f"Saving normalized market research questions to MinIO at {normalized_path}")
+                await self.minio.upload_content(
+                    object_name=normalized_path,
+                    data=json.dumps(normalized_result, indent=2),
+                    content_type="application/json",
+                    metadata={
+                        "business_id": business_idea.id,
+                        "type": "market_research_questions_normalized",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+                logger.info("Normalized market research questions saved to MinIO")
+            
+            return normalized_result
+        else:
+            logger.error("No result obtained from either MinIO or generation")
+            raise ValueError("Failed to generate or retrieve market research questions")
 
     async def generate_state_of_art_questions(
         self, 
-        business_idea: BusinessIdea
+        business_idea: BusinessIdea,
+        business_model: BusinessModel,
+        force_regenerate: bool = False
     ) -> Dict[str, Any]:
         """Genera preguntas de estado del arte basadas en la idea de negocio"""
         logger.info(f"Generating state of art questions for business idea: {business_idea.id} - {business_idea.title}")
-        content = f"""
-        Title: {business_idea.title}
-        Description: {business_idea.description}
-        Mission: {business_idea.mission or ''}
-        Vision: {business_idea.vision or ''}
-        """
         
-        system_prompt = prompts.get_state_of_art_prompt(language=self.language)
-        logger.info(f"Using language: {self.language} for state of art prompt")
+        # IMPORTANTE: Primero verificar si ya existen preguntas en MinIO
+        questions_path = f"{business_idea.id}/business-understanding/state_of_art_questions.json"
+        logger.info(f"Checking for existing questions at path: {questions_path}")
         
-        try:
-            logger.info(f"Calling LLM with model: {self.llm_model} to generate state of art questions")
-            response = self.llm.chat.completions.create(
-                model=self.llm_model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": content}
-                ],
-                temperature=0.3
-            )
+        # Variable para controlar el flujo y almacenar resultados
+        result = None
+        skip_generation = False
+        
+        # Si no se fuerza la regeneración, intentar obtener preguntas existentes
+        if not force_regenerate:
+            try:
+                logger.info(f"Attempting to retrieve existing questions from MinIO")
+                existing_questions = await self.minio.get_object_data(questions_path)
+                
+                if existing_questions:
+                    try:
+                        # Parsear el JSON y verificar que sea válido
+                        questions_data = json.loads(existing_questions)
+                        if questions_data and isinstance(questions_data, dict) and len(questions_data) > 0:
+                            logger.info(f"Found valid existing state of art questions in MinIO with {len(questions_data)} categories")
+                            
+                            # Verificar si ya tiene la normalización de claves
+                            has_normalized_keys = any(key in questions_data for key in [
+                                "AcademicLiteratureAndTheoreticalFoundations",
+                                "EmpiricalStudiesAndBenchmarks",
+                                "ConsumerPerspectivesAndTrends",
+                                "ResearchMethodologies",
+                                "GapAnalysisAndFutureLines",
+                                "PracticalApplicationsAndRecommendations"
+                            ])
+                            
+                            if has_normalized_keys:
+                                logger.info("Questions already have normalized keys, using as-is")
+                                return questions_data
+                            else:
+                                logger.info("Questions need key normalization, processing...")
+                                # Usar los datos existentes pero aplicar normalización
+                                result = questions_data
+                                skip_generation = True
+                    except json.JSONDecodeError:
+                        logger.warning(f"Found existing file but JSON is invalid, will regenerate questions")
+                else:
+                    logger.info("No existing questions found in MinIO")
+            except Exception as e:
+                logger.info(f"Error retrieving questions from MinIO: {str(e)}")
+                logger.info("Will proceed with generating new questions")
+        else:
+            logger.info("Force regenerate is enabled, will generate new questions regardless of existing data")
+        
+        # Si no saltamos la generación, necesitamos generar nuevas preguntas con LLM
+        if not skip_generation:
+            logger.info("Generating new state of art questions")
             
-            logger.info("LLM response received for state of art questions")
-            # Intentamos parsear el JSON de la respuesta
-            response_text = response.choices[0].message.content.strip()
-            
-            # Limpiar posibles marcadores de código
-            if response_text.startswith("```json"):
-                logger.info("Cleaning JSON code markers from response")
-                response_text = response_text.split("```json", 1)[1]
-            if response_text.endswith("```"):
-                response_text = response_text.rsplit("```", 1)[0]
-            
-            response_text = response_text.strip()
-            
-            logger.info("Parsing JSON response for state of art questions")
-            result = json.loads(response_text)
-            logger.info(f"Successfully generated state of art questions with {len(result)} categories")
+            try:
+                # Handle case where BusinessModel doesn't have to_dict method
+                try:
+                    business_model_data = business_model.to_dict()
+                except AttributeError:
+                    logger.warning("BusinessModel object doesn't have to_dict method, using __dict__ instead")
+                    # Create a dict with the model attributes
+                    business_model_data = {
+                        "id": business_model.id,
+                        "business_id": business_model.business_id,
+                        "problem_definition": getattr(business_model, "problem_definition", None),
+                        "industry": getattr(business_model, "industry", None),
+                        "competitors": getattr(business_model, "competitors", None),
+                        "customer_persona": getattr(business_model, "customer_persona", None),
+                        "value_proposition": getattr(business_model, "value_proposition", None),
+                        "competitive_advantage": getattr(business_model, "competitive_advantage", None),
+                        "key_metrics": getattr(business_model, "key_metrics", None),
+                        "key_resources": getattr(business_model, "key_resources", None),
+                        "additional_data": getattr(business_model, "additional_data", {})
+                    }
+                
+                # Use getattr with default values for potentially missing attributes
+                content = f"""
+                Title: {business_idea.title}
+                Description: {business_idea.description}
+                Mission: {getattr(business_idea, 'mission', '')}
+                Vision: {getattr(business_idea, 'vision', '')}
+                Business Model: {business_model_data}
+                """
+                
+                system_prompt = prompts.get_state_of_art_prompt(language=self.language)
+                logger.info(f"Using language: {self.language} for state of art prompt")
+                
+                logger.info(f"Calling LLM with model: {self.llm_model} to generate state of art questions")
+                response = self.llm.chat.completions.create(
+                    model=self.llm_model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": content}
+                    ],
+                    temperature=0.3
+                )
+                
+                logger.info("LLM response received for state of art questions")
+                # Intentamos parsear el JSON de la respuesta
+                response_text = response.choices[0].message.content.strip()
+                
+                # Limpiar posibles marcadores de código
+                if response_text.startswith("```json"):
+                    logger.info("Cleaning JSON code markers from response")
+                    response_text = response_text.split("```json", 1)[1]
+                if response_text.endswith("```"):
+                    response_text = response_text.rsplit("```", 1)[0]
+                
+                response_text = response_text.strip()
+                
+                logger.info("Parsing JSON response for state of art questions")
+                result = json.loads(response_text)
+                logger.info(f"Successfully generated state of art questions with {len(result)} categories")
+                
+                # Save raw questions to MinIO before normalization
+                logger.info(f"Saving raw state of art questions to MinIO at {questions_path}")
+                await self.minio.upload_content(
+                    object_name=questions_path,
+                    data=json.dumps(result, indent=2),
+                    content_type="application/json",
+                    metadata={
+                        "business_id": business_idea.id,
+                        "type": "state_of_art_questions",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+                logger.info("Raw state of art questions saved to MinIO")
+                
+            except Exception as e:
+                logger.error(f"Error generating state of art questions: {str(e)}", exc_info=True)
+                raise
+        
+        # Ahora procesamos el resultado para normalizarlo (ya sea de MinIO o generado)
+        if result:
+            logger.info("Normalizing question keys")
             
             # Normalize keys in case they don't match expected format
             normalized_result = {}
@@ -238,12 +513,27 @@ class MarketStateOfArtService:
                             "fuentesSugeridas": []
                         }
             
-            return normalized_result
+            # Save normalized data back to MinIO if it was generated from scratch
+            if not skip_generation:
+                normalized_path = f"{business_idea.id}/business-understanding/state_of_art_questions_normalized.json"
+                logger.info(f"Saving normalized state of art questions to MinIO at {normalized_path}")
+                await self.minio.upload_content(
+                    object_name=normalized_path,
+                    data=json.dumps(normalized_result, indent=2),
+                    content_type="application/json",
+                    metadata={
+                        "business_id": business_idea.id,
+                        "type": "state_of_art_questions_normalized",
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+                logger.info("Normalized state of art questions saved to MinIO")
             
-        except Exception as e:
-            logger.error(f"Error generating state of art questions: {str(e)}", exc_info=True)
-            raise
-    
+            return normalized_result
+        else:
+            logger.error("No result obtained from either MinIO or generation")
+            raise ValueError("Failed to generate or retrieve state of art questions")
+
     async def create_research_tasks(
         self, 
         questions_dict: Dict[str, Any],
@@ -395,7 +685,8 @@ class MarketStateOfArtService:
             # Create and send research request
             try:
                 # Create the callback URL with the task ID
-                callback_url = f"/api/v1/business/{business_idea_id}/research-callback/{task.id}"
+                base_url = self.base_url or ""
+                callback_url = f"{base_url}/api/v1/webhooks/research-callback/{task.id}"
                 
                 # Send research request
                 request_dict = {
@@ -403,7 +694,8 @@ class MarketStateOfArtService:
                     "task_id": task.id,
                     "business_id": business_idea_id,
                     "research_type": research_type,
-                    "callback_url": callback_url
+                    "callback_url": callback_url,
+                    "model": self.model
                 }
                 
                 # Send to research module
@@ -453,8 +745,36 @@ class MarketStateOfArtService:
             return False
         
         try:
+            # Extract the research text from the response
+            research_text = research_data.get("text", "")
+            if not research_text:
+                logger.error(f"No text found in research data for task {task_id}")
+                task.status = StatusEnum.FAILED
+                task.error_message = "No text found in research data"
+                self.db.commit()
+                return False
+            
+            logger.info(f"Received research text of length {len(research_text)} for task {task_id}")
+            
+            # Extract citations if present (might be empty string or array)
+            citations = research_data.get("citations", [])
+            if isinstance(citations, str) and not citations:
+                # Convert empty string to empty array
+                citations = []
+            
+            # Format the answer data
+            answer_data = {
+                "text": research_text,
+                "citations": citations,
+                "request_id": research_data.get("request_id", task.request_id),
+                "business_id": research_data.get("business_id", task.business_idea_id),
+                "research_type": research_data.get("research_type", str(task.research_type)),
+                "search_prompt": research_data.get("search_prompt", ""),
+                "timestamp": datetime.now().isoformat()
+            }
+            
             # Update task with answer data
-            task.add_answer(research_data)
+            task.add_answer(answer_data)
             task.status = StatusEnum.COMPLETED
             self.db.commit()
             
@@ -564,48 +884,62 @@ class MarketStateOfArtService:
             
         return result
     
-    async def process_business_understanding(
+    async def process_market_research(
         self, 
         business_idea_id: str,
         force_update: bool = False,
-        depth: str = "normal"
+        depth: str = "normal",
+        model: str = None
     ) -> Dict[str, Any]:
-        """Procesa toda la lógica de business understanding para una idea de negocio"""
-        logger.info(f"Starting business understanding process for business idea: {business_idea_id}")
+        """Procesa solamente la lógica de market research para una idea de negocio"""
+        logger.info(f"Starting market research process for business idea: {business_idea_id}")
         
         # Update the depth parameter
         self.depth = depth
         logger.info(f"Using depth parameter: {self.depth}")
         
+        # Update the model parameter if provided
+        if model:
+            self.model = model
+            # Update the research config model too
+            self.research_config.model = model
+            logger.info(f"Using model parameter: {self.model}")
+        
         # Obtener o crear registros
         logger.info("Getting business idea from database")
-        business_idea = await self._get_business_idea(business_idea_id)
+        business_idea = self._get_business_idea(business_idea_id)
         logger.info(f"Retrieved business idea: {business_idea.title}")
         
         logger.info("Getting or creating business understanding record")
-        business_understanding = await self._get_or_create_business_understanding(business_idea_id)
+        #get business model from database
+        business_model = self.db.query(BusinessModel).filter(BusinessModel.business_id == business_idea_id).first()
+        
+        # If no business model exists, create a new one
+        if not business_model:
+            logger.info(f"No business model found for business idea ID: {business_idea_id}, creating a new one")
+            business_model = BusinessModel(
+                business_id=business_idea_id
+            )
+            self.db.add(business_model)
+            self.db.commit()
+            self.db.refresh(business_model)
+            logger.info(f"Created new business model for business idea ID: {business_idea_id}")
+        
+        business_understanding = self._get_or_create_business_understanding(business_idea_id)
         logger.info(f"Business understanding record ID: {business_understanding.id}")
         
-        # Define paths for MinIO objects
+        # Define path for MinIO object
         market_research_path = f"{business_idea_id}/business-understanding/market_research_{self.depth}.json"
-        state_of_art_path = f"{business_idea_id}/business-understanding/state_of_art_{self.depth}.json"
         
-        # If force_update is True, delete existing files in MinIO
+        # If force_update is True, delete existing file in MinIO
         if force_update:
-            logger.info("Force update requested, deleting existing files in MinIO")
+            logger.info("Force update requested, deleting existing file in MinIO")
             try:
                 logger.info(f"Attempting to delete market research file: {market_research_path}")
                 self.minio.delete_object(market_research_path)
                 logger.info("Market research file deleted successfully")
             except Exception as e:
                 logger.warning(f"Error deleting market research file: {str(e)}")
-            
-            try:
-                logger.info(f"Attempting to delete state of art file: {state_of_art_path}")
-                self.minio.delete_object(state_of_art_path)
-                logger.info("State of art file deleted successfully")
-            except Exception as e:
-                logger.warning(f"Error deleting state of art file: {str(e)}")
         
         results = {}
         
@@ -627,9 +961,13 @@ class MarketStateOfArtService:
                     ).delete()
                     self.db.commit()
                 
-                # Generar preguntas
+                # Generar preguntas - Pass force_update to force regeneration if needed
                 logger.info("Generating market research questions")
-                market_research_questions = await self.generate_market_research_questions(business_idea)
+                market_research_questions = await self.generate_market_research_questions(
+                    business_idea, 
+                    business_model,
+                    force_regenerate=force_update
+                )
                 logger.info("Market research questions generated successfully")
                 
                 # Create research tasks
@@ -667,6 +1005,68 @@ class MarketStateOfArtService:
                 "path": business_understanding.market_research_path
             }
         
+        logger.info("Market research process initiated")
+        return results
+        
+    async def process_state_of_art(
+        self, 
+        business_idea_id: str,
+        force_update: bool = False,
+        depth: str = "normal",
+        model: str = None
+    ) -> Dict[str, Any]:
+        """Procesa solamente la lógica de state of art para una idea de negocio"""
+        logger.info(f"Starting state of art process for business idea: {business_idea_id}")
+        
+        # Update the depth parameter
+        self.depth = depth
+        logger.info(f"Using depth parameter: {self.depth}")
+        
+        # Update the model parameter if provided
+        if model:
+            self.model = model
+            # Update the research config model too
+            self.research_config.model = model
+            logger.info(f"Using model parameter: {self.model}")
+        
+        # Obtener o crear registros
+        logger.info("Getting business idea from database")
+        business_idea = self._get_business_idea(business_idea_id)
+        logger.info(f"Retrieved business idea: {business_idea.title}")
+        
+        logger.info("Getting or creating business understanding record")
+        #get business model from database
+        business_model = self.db.query(BusinessModel).filter(BusinessModel.business_id == business_idea_id).first()
+        
+        # If no business model exists, create a new one
+        if not business_model:
+            logger.info(f"No business model found for business idea ID: {business_idea_id}, creating a new one")
+            business_model = BusinessModel(
+                business_id=business_idea_id
+            )
+            self.db.add(business_model)
+            self.db.commit()
+            self.db.refresh(business_model)
+            logger.info(f"Created new business model for business idea ID: {business_idea_id}")
+        
+        business_understanding = self._get_or_create_business_understanding(business_idea_id)
+        logger.info(f"Business understanding record ID: {business_understanding.id}")
+        
+        # Define path for MinIO object
+        state_of_art_path = f"{business_idea_id}/business-understanding/state_of_art_{self.depth}.json"
+        
+        # If force_update is True, delete existing file in MinIO
+        if force_update:
+            logger.info("Force update requested, deleting existing file in MinIO")
+            try:
+                logger.info(f"Attempting to delete state of art file: {state_of_art_path}")
+                self.minio.delete_object(state_of_art_path)
+                logger.info("State of art file deleted successfully")
+            except Exception as e:
+                logger.warning(f"Error deleting state of art file: {str(e)}")
+        
+        results = {}
+        
         # Continuar con estado del arte si no está completado o force_update es True
         if business_understanding.state_of_art_status != StatusEnum.COMPLETED or force_update:
             logger.info("State of art not completed or force update requested, starting process")
@@ -685,9 +1085,13 @@ class MarketStateOfArtService:
                     ).delete()
                     self.db.commit()
                 
-                # Generar preguntas
+                # Generar preguntas - Pass force_update to force regeneration if needed
                 logger.info("Generating state of art questions")
-                state_of_art_questions = await self.generate_state_of_art_questions(business_idea)
+                state_of_art_questions = await self.generate_state_of_art_questions(
+                    business_idea, 
+                    business_model,
+                    force_regenerate=force_update
+                )
                 logger.info("State of art questions generated successfully")
                 
                 # Create research tasks
@@ -724,6 +1128,52 @@ class MarketStateOfArtService:
                 "status": "already_completed",
                 "path": business_understanding.state_of_art_path
             }
+        
+        logger.info("State of art process initiated")
+        return results
+    
+    async def process_business_understanding(
+        self, 
+        business_idea_id: str,
+        force_update: bool = False,
+        depth: str = "normal",
+        model: str = None
+    ) -> Dict[str, Any]:
+        """Procesa toda la lógica de business understanding para una idea de negocio"""
+        logger.info(f"Starting business understanding process for business idea: {business_idea_id}")
+        
+        # Update the depth parameter
+        self.depth = depth
+        logger.info(f"Using depth parameter: {self.depth}")
+        
+        # Update the model parameter if provided
+        if model:
+            self.model = model
+            # Update the research config model too
+            self.research_config.model = model
+            logger.info(f"Using model parameter: {self.model}")
+        
+        # Run market research process
+        market_research_results = await self.process_market_research(
+            business_idea_id=business_idea_id, 
+            force_update=force_update, 
+            depth=depth, 
+            model=model
+        )
+        
+        # Run state of art process
+        state_of_art_results = await self.process_state_of_art(
+            business_idea_id=business_idea_id, 
+            force_update=force_update, 
+            depth=depth, 
+            model=model
+        )
+        
+        # Combine results
+        results = {
+            "market_research": market_research_results.get("market_research", {}),
+            "state_of_art": state_of_art_results.get("state_of_art", {})
+        }
         
         logger.info("Business understanding process initiated")
         return results

@@ -233,6 +233,7 @@ class ResearchModule:
             business_id = query_data.get("business_id")
             competitor_id = query_data.get("competitor_id")
             task_id = query_data.get("task_id")
+            research_type = query_data.get("research_type", "general")
             
             # Prepare data payload
             data = {
@@ -240,7 +241,7 @@ class ResearchModule:
                 "lang": self.language,
                 "answer": "api",
                 "require_validation": self.config.require_validation,
-                "model": self.config.model,
+                "model": self.config.model,  # Use the model specified in ResearchConfig
                 "depth": self.config.max_iterations,
                 "validate_existance": self.config.validate_existance,
                 "research": search_query,
@@ -258,9 +259,14 @@ class ResearchModule:
                 data["competitor_id"] = competitor_id
             if task_id:
                 data["task_id"] = task_id
+            if research_type:
+                data["research_type"] = research_type
                 
             if callback_url:
                 logger.info(f"Including callback URL in request: {callback_url}")
+            
+            # Log the model being used
+            logger.info(f"Using model for research: {self.config.model}")
             
         except Exception as e:
             logger.error(f"Error processing research query: {str(e)}")

@@ -2,6 +2,16 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from app.services.business.competitive_analysis.business_competitors_extraction import CompetitorInfo
 
+class WebsiteSocialMediaScrapingRequest(BaseModel):
+    update_db: bool = True
+    competitor_ids: Optional[List[str]] = None
+
+# Schema for website social media scraping response
+class WebsiteSocialMediaScrapingResponse(BaseModel):
+    task_id: str
+    status: str
+    results: Optional[dict]
+
 class CompetitorAnalysisRequest(BaseModel):
     """Request model for competitor analysis"""
     search_prompt: str = Field(..., description="The search prompt to use for researching competitors")

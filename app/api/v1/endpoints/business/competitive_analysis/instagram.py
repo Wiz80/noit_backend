@@ -42,6 +42,14 @@ class AnalysisProgressResponse(BaseModel):
     status: str
     results: Optional[dict]
 
+# Schema for competitor analysis request
+class CompetitorAnalysisRequest(BaseModel):
+    competitors_ids: Optional[List[str]] = None
+    
+    def get_competitor_ids(self):
+        """Return the competitor IDs, using competitors_ids as fallback if competitor_ids is None"""
+        return self.competitors_ids or None
+
 # Schema for comment analysis request
 class CommentAnalysisRequest(BaseModel):
     username: str
@@ -49,7 +57,7 @@ class CommentAnalysisRequest(BaseModel):
     language: str = "es"
     num_topics: int = 5
     provider: str = "openai"
-    model: str = "gpt-4-0125-preview"
+    model: str = "gpt-4o-mini"
 
 # Schema for comment analysis response
 class CommentAnalysisResponse(BaseModel):
@@ -73,15 +81,19 @@ analysis_progress = {}
 @router.post("/{business_id}", response_model=AnalysisResponse)
 async def start_instagram_competitor_analysis(
     business_id: UUID,
+    request: CompetitorAnalysisRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     """
     Start Instagram competitor analysis for a specific business_id.
-    Currently runs synchronously for debugging purposes.
+    Allows filtering specific competitors by providing their IDs in the request body.
     
     Args:
         business_id: UUID of the business idea
+        request: Request body containing:
+            - competitor_ids: Optional list of competitor IDs to analyze. If not provided or empty,
+              all competitors for the business will be analyzed.
         background_tasks: FastAPI background tasks (not used currently)
         db: Database session
         
@@ -94,12 +106,30 @@ async def start_instagram_competitor_analysis(
             raise HTTPException(status_code=404, detail="Business idea not found")
 
         # Check if there are competitors with Instagram URLs
-        competitors = db.query(Competitor).filter(
-            Competitor.business_idea_id == str(business_id),
-        ).all()
+        competitors_query = db.query(Competitor).filter(
+            Competitor.business_idea_id == str(business_id)
+        )
+        
+        # Filter by competitor_ids if provided
+        if request.competitors_ids:
+            competitors_query = competitors_query.filter(
+                Competitor.id.in_(request.competitors_ids)
+            )
+            
+        competitors = competitors_query.all()
 
         if not competitors:
-            raise HTTPException(status_code=404, detail="No competitors with Instagram URLs found")
+            raise HTTPException(status_code=404, detail="No competitors found with the specified criteria")
+            
+        # Verify that the competitors have Instagram URLs
+        valid_competitors = [c for c in competitors if c.instagram_url]
+        if not valid_competitors:
+            raise HTTPException(status_code=404, detail="None of the selected competitors have Instagram URLs")
+            
+        # If only some competitors have Instagram URLs, log a warning
+        if len(valid_competitors) < len(competitors):
+            logging.warning(f"{len(competitors) - len(valid_competitors)} competitors without Instagram URLs will be skipped")
+            competitors = valid_competitors
 
         # Generate a unique task ID
         task_id = str(uuid.uuid4())
@@ -116,15 +146,23 @@ async def start_instagram_competitor_analysis(
         await run_instagram_full_analysis(
             business_id=str(business_id),
             task_id=task_id,
-            db=db
+            db=db,
+            competitor_ids=request.competitors_ids,
+            competitors=valid_competitors
         )
 
         # Get the final results from the progress cache
         final_result = analysis_progress.get(task_id, {})
+        
+        # Add details about skipped competitors if any were filtered out
+        skipped_message = ""
+        if len(valid_competitors) < len(competitors):
+            skipped_count = len(competitors) - len(valid_competitors)
+            skipped_message = f" ({skipped_count} competitors were skipped due to missing Instagram URLs)"
 
         return AnalysisResponse(
             task_id=task_id,
-            message=f"Instagram competitor analysis completed with status: {final_result.get('status', 'unknown')}",
+            message=f"Instagram competitor analysis completed with status: {final_result.get('status', 'unknown')}{skipped_message}",
             status=final_result.get("status", "unknown")
         )
 
@@ -169,7 +207,7 @@ async def get_instagram_analysis_progress(
         results=progress_data.get("results")
     )
 
-async def run_instagram_full_analysis(business_id: str, task_id: str, db: Session):
+async def run_instagram_full_analysis(business_id: str, task_id: str, db: Session, competitor_ids: Optional[List[str]] = None, competitors: Optional[List[Competitor]] = None):
     """
     Function that executes full Instagram analysis in the background using InstagramScraper.
     Now uses the InstagramCompetitorController for better separation of concerns.
@@ -178,12 +216,27 @@ async def run_instagram_full_analysis(business_id: str, task_id: str, db: Sessio
         business_id: Business idea ID
         task_id: Task identifier
         db: Database session
+        competitor_ids: Optional list of competitor IDs to analyze
+        competitors: Optional pre-filtered list of competitors to analyze
     """
     try:
-        # Get all competitors for this business idea
-        competitors = db.query(Competitor).filter(
-            Competitor.business_idea_id == business_id
-        ).all()
+        # If competitors are already provided, use them
+        if not competitors:
+            # Get competitors for this business idea
+            competitors_query = db.query(Competitor).filter(
+                Competitor.business_idea_id == business_id
+            )
+            
+            # Filter by competitor_ids if provided
+            if competitor_ids:
+                competitors_query = competitors_query.filter(
+                    Competitor.id.in_(competitor_ids)
+                )
+                
+            competitors = competitors_query.all()
+            
+            # Filter out competitors without Instagram URLs
+            competitors = [c for c in competitors if c.instagram_url]
 
         total_competitors = len(competitors)
         completed = 0

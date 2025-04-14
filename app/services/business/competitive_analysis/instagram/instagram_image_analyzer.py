@@ -8,6 +8,7 @@ from openai import OpenAI
 from app.services.storage.minio_service import MinioService
 from sqlalchemy.orm import Session
 from app.models.business.competitive_analysis.instagram import InstagramPostInfo, InstagramPostImage, InstagramImageColor, InstagramUserInfo
+from datetime import datetime
 
 class InstagramImageAnalyzer:
     """
@@ -923,3 +924,83 @@ class InstagramImageAnalyzer:
         
         print(f"☁️ Reporte de análisis del feed subido a MinIO: {report_object_name}")
         return final_report
+
+    async def analyze_images(self):
+        """
+        Analyze all images available in MinIO for the given output folder.
+        
+        This method scans the output folder for images, processes them,
+        and saves the analysis results.
+        
+        :return: Dictionary with analysis results
+        """
+        try:
+            print(f"🔎 Analyzing images in output folder: {self.output_folder}")
+            
+            # Get list of image objects from MinIO
+            image_prefix = f"{self.output_folder}/images/"
+            image_objects = self.minio_service.list_objects(prefix=image_prefix)
+            
+            if not image_objects:
+                print(f"⚠️ No images found in {image_prefix}")
+                return {"status": "error", "message": "No images found"}
+            
+            # Process images and get their analysis
+            results = []
+            
+            for image_object in image_objects:
+                try:
+                    object_name = image_object if isinstance(image_object, str) else image_object.object_name
+                    file_name = os.path.basename(object_name)
+                    
+                    # Encode image to base64
+                    base64_image = await self.encode_image_from_minio(object_name)
+                    if not base64_image:
+                        continue
+                    
+                    # Get image data for color extraction
+                    image_data = self.minio_service.get_object_data(object_name)
+                    if not image_data:
+                        continue
+                    
+                    # Extract color palette
+                    color_palette = self.extract_color_palette_from_bytes(image_data)
+                    
+                    # Analyze image with OpenAI
+                    gpt4o_analysis = await self.analyze_image_with_openai(base64_image)
+                    
+                    # Add to results
+                    results.append({
+                        "file_name": file_name,
+                        "gpt4o_analysis": gpt4o_analysis,
+                        "color_palette": color_palette
+                    })
+                    
+                    print(f"✓ Analyzed image: {file_name}")
+                    
+                except Exception as e:
+                    print(f"❌ Error processing image: {str(e)}")
+            
+            # Save results to MinIO
+            analysis_data = {
+                "images_analyzed": results,
+                "total_images": len(results),
+                "analysis_timestamp": datetime.now().isoformat()
+            }
+            
+            analysis_json = json.dumps(analysis_data, ensure_ascii=False, indent=2)
+            output_path = f"{self.output_folder}/image_analysis.json"
+            
+            self.minio_service.put_object(
+                object_name=output_path,
+                data=analysis_json.encode('utf-8'),
+                content_type="application/json"
+            )
+            
+            print(f"💾 Saved image analysis to {output_path}")
+            return {"status": "success", "analysis": analysis_data}
+            
+        except Exception as e:
+            error_message = f"Error analyzing images: {str(e)}"
+            print(f"❌ {error_message}")
+            return {"status": "error", "message": error_message}

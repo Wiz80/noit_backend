@@ -833,7 +833,7 @@ class InstagramScraper:
                 logger.info(f"Starting image analysis for {username}")
                 
                 # Check if images are already downloaded
-                image_analyzer = InstagramImageAnalyzer(username=username, output_folder=f"{self.output_folder}/{username}")
+                image_analyzer = InstagramImageAnalyzer(api_key=os.getenv("OPENAI_API_KEY"), output_folder=f"{self.output_folder}/{username}")
                 
                 # Get list of image objects from MinIO
                 image_objects = self.minio_service.list_objects(prefix=f"{self.output_folder}/{username}/images/")

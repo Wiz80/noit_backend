@@ -229,7 +229,8 @@ async def create_state_of_art_research(
             minio_client=minio_client,
             language=language,
             depth=depth,
-            model=model
+            model=model,
+            base_url=base_url
         )
         
         # Process the state of art research asynchronously
@@ -369,10 +370,12 @@ async def get_research_status(
 async def get_state_of_art(
     business_idea_id: str,
     db: Session = Depends(deps.get_db),
+    minio_client: MinioService = Depends(deps.get_minio_client),
     current_user: User = Depends(deps.get_current_user)
 ):
     """
     Get the state of art analysis for a business idea.
+    Retrieves the state of art JSON data from MinIO storage.
     
     Requires authentication with a valid JWT token.
     """
@@ -388,7 +391,7 @@ async def get_state_of_art(
         if not business_idea:
             raise HTTPException(status_code=404, detail="Business idea not found")
         
-        # Get the state of art
+        # Get the state of art record
         state_of_art = db.query(MarketStateOfArt).filter(
             MarketStateOfArt.business_idea_id == business_idea_id
         ).first()
@@ -396,11 +399,40 @@ async def get_state_of_art(
         if not state_of_art:
             raise HTTPException(status_code=404, detail="State of art not found")
         
-        result = state_of_art.to_dict()
-        result["user_id"] = current_user.id
+        # Get the path to the state of art file in MinIO
+        state_of_art_path = state_of_art.state_of_art_path
+        
+        if not state_of_art_path:
+            logger.warning(f"State of art path is empty for business idea: {business_idea_id}")
+            raise HTTPException(status_code=404, detail="State of art file not found in storage")
+        
+        # Retrieve the state of art data from MinIO
+        logger.info(f"Retrieving state of art data from MinIO path: {state_of_art_path}")
+        state_of_art_data = minio_client.get_object_data(state_of_art_path)
+        
+        if not state_of_art_data:
+            logger.error(f"Failed to retrieve state of art data from MinIO: {state_of_art_path}")
+            raise HTTPException(status_code=404, detail="State of art data not found in storage")
+        
+        # Parse the JSON data
+        try:
+            state_of_art_json = json.loads(state_of_art_data.decode('utf-8'))
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing state of art JSON data: {str(e)}")
+            raise HTTPException(status_code=500, detail="Error parsing state of art data")
+        
+        # Prepare the response
+        result = {
+            "business_idea_id": business_idea_id,
+            "user_id": current_user.id,
+            "state_of_art_status": state_of_art.state_of_art_status,
+            "data": state_of_art_json
+        }
         
         return result
     
+    except HTTPException as e:
+        raise e
     except Exception as e:
         logger.error(f"Error in get_state_of_art: {str(e)}", exc_info=True)
         raise HTTPException(

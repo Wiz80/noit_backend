@@ -83,6 +83,8 @@ async def start_instagram_competitor_analysis(
     business_id: UUID,
     request: CompetitorAnalysisRequest,
     background_tasks: BackgroundTasks,
+    results_limit: int = 10,
+    max_comments: int = 5,
     db: Session = Depends(get_db)
 ):
     """
@@ -95,6 +97,8 @@ async def start_instagram_competitor_analysis(
             - competitor_ids: Optional list of competitor IDs to analyze. If not provided or empty,
               all competitors for the business will be analyzed.
         background_tasks: FastAPI background tasks (not used currently)
+        results_limit: Maximum number of posts to extract per Instagram account (default: 10)
+        max_comments: Maximum number of comments to extract per post (default: 5)
         db: Database session
         
     Returns:
@@ -148,7 +152,9 @@ async def start_instagram_competitor_analysis(
             task_id=task_id,
             db=db,
             competitor_ids=request.competitors_ids,
-            competitors=valid_competitors
+            competitors=valid_competitors,
+            results_limit=results_limit,
+            max_comments=max_comments
         )
 
         # Get the final results from the progress cache
@@ -207,7 +213,7 @@ async def get_instagram_analysis_progress(
         results=progress_data.get("results")
     )
 
-async def run_instagram_full_analysis(business_id: str, task_id: str, db: Session, competitor_ids: Optional[List[str]] = None, competitors: Optional[List[Competitor]] = None):
+async def run_instagram_full_analysis(business_id: str, task_id: str, db: Session, competitor_ids: Optional[List[str]] = None, competitors: Optional[List[Competitor]] = None, results_limit: int = 10, max_comments: int = 5):
     """
     Function that executes full Instagram analysis in the background using InstagramScraper.
     Now uses the InstagramCompetitorController for better separation of concerns.
@@ -218,6 +224,8 @@ async def run_instagram_full_analysis(business_id: str, task_id: str, db: Sessio
         db: Database session
         competitor_ids: Optional list of competitor IDs to analyze
         competitors: Optional pre-filtered list of competitors to analyze
+        results_limit: Maximum number of posts to extract per Instagram account
+        max_comments: Maximum number of comments to extract per post
     """
     try:
         # If competitors are already provided, use them
@@ -256,8 +264,8 @@ async def run_instagram_full_analysis(business_id: str, task_id: str, db: Sessio
                     result = await controller.analyze_instagram_competitor(
                         username=username,
                         competitor_id=competitor.id,
-                        results_limit=10,
-                        max_comments=5
+                        results_limit=results_limit,
+                        max_comments=max_comments
                     )
                     
                     results[competitor.competitor_name] = {

@@ -991,9 +991,9 @@ class InstagramImageAnalyzer:
             analysis_json = json.dumps(analysis_data, ensure_ascii=False, indent=2)
             output_path = f"{self.output_folder}/image_analysis.json"
             
-            self.minio_service.put_object(
+            await self.minio_service.upload_content(
                 object_name=output_path,
-                data=analysis_json.encode('utf-8'),
+                data=analysis_json,
                 content_type="application/json"
             )
             

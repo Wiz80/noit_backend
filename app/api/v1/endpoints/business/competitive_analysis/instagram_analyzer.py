@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from app.db.session import get_db
-from app.models.business import BusinessIdea
+from app.api.deps import get_db
+from app.models.business.business_idea import BusinessIdea
 from app.models.business.competitive_analysis.instagram import InstagramUserInfo
 from app.services.business.competitive_analysis.instagram.instagram_image_analyzer import InstagramImageAnalyzer
 

@@ -45,11 +45,23 @@ async def log_requests(request: Request, call_next):
     
     return response
 
+# Include API router
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 async def root():
     return {"message": "Welcome to Infinity Lab API"}
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    Application startup event handler.
+    Services like MinIO are now configured for lazy loading, meaning they will only
+    initialize connections when actually needed, not during application startup.
+    This significantly improves the startup time of the application.
+    """
+    logger.info("Starting application with optimized lazy-loading services")
+    logger.info("Services like MinIO will only connect when actually needed")
 
 if __name__ == "__main__":
     import uvicorn

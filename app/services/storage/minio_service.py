@@ -23,35 +23,50 @@ class MinioService:
                  region: str = settings.MINIO_REGION,
                  connection_timeout: int = 5):
                  
-        self.client = Minio(
-            endpoint=endpoint,
-            access_key=access_key,
-            secret_key=secret_key,
-            region=region
-        )
-        self.bucket_name = bucket_name
-        self.connection_timeout = connection_timeout
+        self._bucket_name = bucket_name
+        self._endpoint = endpoint
+        self._access_key = access_key
+        self._secret_key = secret_key
+        self._region = region
+        self._connection_timeout = connection_timeout
+        self._client = None
         
-        # Only check bucket once per app lifetime for each unique bucket
-        if bucket_name not in self._checked_buckets:
-            self._ensure_bucket_exists()
-            MinioService._checked_buckets.add(bucket_name)
+    @property
+    def bucket_name(self):
+        return self._bucket_name
+        
+    @property
+    def client(self):
+        """Lazy initialization of the Minio client."""
+        if self._client is None:
+            logger.info(f"Initializing MinIO client for bucket '{self._bucket_name}'")
+            self._client = Minio(
+                endpoint=self._endpoint,
+                access_key=self._access_key,
+                secret_key=self._secret_key,
+                region=self._region
+            )
+            # Only check bucket once per app lifetime for each unique bucket
+            if self._bucket_name not in self._checked_buckets:
+                self._ensure_bucket_exists()
+                MinioService._checked_buckets.add(self._bucket_name)
+        return self._client
 
     def _ensure_bucket_exists(self):
         try:
             # Add a timeout to the bucket check operation
-            if not self.client.bucket_exists(self.bucket_name):
-                self.client.make_bucket(self.bucket_name)
-                logger.info(f"Bucket '{self.bucket_name}' created successfully.")
+            if not self._client.bucket_exists(self._bucket_name):
+                self._client.make_bucket(self._bucket_name)
+                logger.info(f"Bucket '{self._bucket_name}' created successfully.")
             else:
-                logger.info(f"Bucket '{self.bucket_name}' already exists.")
+                logger.info(f"Bucket '{self._bucket_name}' already exists.")
         except S3Error as e:
-            logger.error(f"Error checking/creating bucket '{self.bucket_name}': {e}")
+            logger.error(f"Error checking/creating bucket '{self._bucket_name}': {e}")
             raise
         except Exception as e:
             logger.error(f"Unexpected error connecting to MinIO: {e}")
             # Continue with app startup even if MinIO is not available
-            logger.warning(f"Proceeding without confirming bucket '{self.bucket_name}' exists.")
+            logger.warning(f"Proceeding without confirming bucket '{self._bucket_name}' exists.")
     
     async def upload_content(
         self, 

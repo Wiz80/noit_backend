@@ -1,8 +1,8 @@
-"""add_application_tables
+"""init tables
 
-Revision ID: 6baecb22dfd8
-Revises: 16a583a25118
-Create Date: 2025-04-11 23:15:43.271950
+Revision ID: 8dc73e156fcf
+Revises: 
+Create Date: 2025-04-22 20:28:44.306550
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '6baecb22dfd8'
+revision: str = '8dc73e156fcf'
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -191,6 +191,26 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_business_canvas_id'), 'business_canvas', ['id'], unique=False)
+    op.create_table('business_models',
+    sa.Column('id', sa.String(), nullable=False),
+    sa.Column('business_id', sa.String(), nullable=True),
+    sa.Column('problem_definition', sa.Text(), nullable=True),
+    sa.Column('industry', sa.Text(), nullable=True),
+    sa.Column('competitors', sa.Text(), nullable=True),
+    sa.Column('customer_persona', sa.Text(), nullable=True),
+    sa.Column('value_proposition', sa.Text(), nullable=True),
+    sa.Column('competitive_advantage', sa.Text(), nullable=True),
+    sa.Column('key_metrics', sa.Text(), nullable=True),
+    sa.Column('key_resources', sa.Text(), nullable=True),
+    sa.Column('additional_data', sa.JSON(), nullable=True),
+    sa.Column('minio_url', sa.String(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('updated_at', sa.DateTime(), nullable=True),
+    sa.ForeignKeyConstraint(['business_id'], ['business_ideas.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_business_models_business_id'), 'business_models', ['business_id'], unique=False)
+    op.create_index(op.f('ix_business_models_id'), 'business_models', ['id'], unique=False)
     op.create_table('business_progress',
     sa.Column('id', sa.String(), nullable=False),
     sa.Column('business_id', sa.String(), nullable=False),
@@ -394,24 +414,59 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_instagram_scraping_jobs_id'), 'instagram_scraping_jobs', ['id'], unique=False)
-    # Drop existing tables with CASCADE
-    op.execute("DROP TABLE IF EXISTS user_role CASCADE")
-    op.execute("DROP TABLE IF EXISTS permission CASCADE")
-    op.execute("DROP TABLE IF EXISTS pipeline_schedule_event_matcher_association CASCADE")
-    op.execute("DROP TABLE IF EXISTS role_permission CASCADE")
-    op.execute("DROP TABLE IF EXISTS oauth2_access_token CASCADE")
-    op.execute("DROP TABLE IF EXISTS event_matcher CASCADE")
-    op.execute("DROP TABLE IF EXISTS backfill CASCADE")
-    op.execute("DROP TABLE IF EXISTS role CASCADE")
-    op.execute("DROP TABLE IF EXISTS user_project CASCADE")
-    op.execute("DROP TABLE IF EXISTS pipeline_schedule CASCADE")
-    op.execute("DROP TABLE IF EXISTS tag CASCADE")
-    op.execute("DROP TABLE IF EXISTS tag_association CASCADE")
-    op.execute("DROP TABLE IF EXISTS pipeline_run CASCADE")
-    op.execute('DROP TABLE IF EXISTS "user" CASCADE')
-    op.execute("DROP TABLE IF EXISTS block_run CASCADE")
-    op.execute("DROP TABLE IF EXISTS oauth2_application CASCADE")
-    op.execute("DROP TABLE IF EXISTS secret CASCADE")
+    op.create_table('research_tasks',
+    sa.Column('id', sa.String(), nullable=False),
+    sa.Column('business_understanding_id', sa.String(), nullable=True),
+    sa.Column('business_idea_id', sa.String(), nullable=False),
+    sa.Column('request_id', sa.String(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('research_type', sa.String(), nullable=False),
+    sa.Column('depth', sa.String(), nullable=True),
+    sa.Column('chunk_index', sa.String(), nullable=False),
+    sa.Column('questions', sa.Text(), nullable=False),
+    sa.Column('status', sa.String(), nullable=True),
+    sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('answer', sa.Text(), nullable=True),
+    sa.Column('error_message', sa.Text(), nullable=True),
+    sa.ForeignKeyConstraint(['business_understanding_id'], ['business_understanding.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_research_tasks_id'), 'research_tasks', ['id'], unique=False)
+    op.create_index(op.f('ix_research_tasks_request_id'), 'research_tasks', ['request_id'], unique=False)
+    op.drop_index('ix_pipeline_schedule_global_data_product_uuid', table_name='pipeline_schedule')
+    op.drop_index('ix_pipeline_schedule_pipeline_uuid', table_name='pipeline_schedule')
+    op.drop_index('ix_pipeline_schedule_token', table_name='pipeline_schedule')
+    op.drop_table('pipeline_schedule')
+    op.drop_table('role_permission')
+    op.drop_index('ix_tag_name', table_name='tag')
+    op.drop_table('tag')
+    op.drop_index('ix_tag_association_taggable_id', table_name='tag_association')
+    op.drop_table('tag_association')
+    op.drop_index('ix_role_name', table_name='role')
+    op.drop_table('role')
+    op.drop_index('ix_user_email', table_name='user')
+    op.drop_index('ix_user_username', table_name='user')
+    op.drop_table('user')
+    op.drop_table('user_project')
+    op.drop_table('user_role')
+    op.drop_index('ix_pipeline_run_backfill_id', table_name='pipeline_run')
+    op.drop_index('ix_pipeline_run_execution_date', table_name='pipeline_run')
+    op.drop_index('ix_pipeline_run_pipeline_schedule_id', table_name='pipeline_run')
+    op.drop_index('ix_pipeline_run_pipeline_uuid', table_name='pipeline_run')
+    op.drop_index('ix_pipeline_run_status', table_name='pipeline_run')
+    op.drop_table('pipeline_run')
+    op.drop_index('ix_oauth2_access_token_token', table_name='oauth2_access_token')
+    op.drop_table('oauth2_access_token')
+    op.drop_table('permission')
+    op.drop_table('pipeline_schedule_event_matcher_association')
+    op.drop_table('event_matcher')
+    op.drop_index('ix_oauth2_application_client_id', table_name='oauth2_application')
+    op.drop_table('oauth2_application')
+    op.drop_index('ix_block_run_pipeline_run_id', table_name='block_run')
+    op.drop_table('block_run')
+    op.drop_table('backfill')
+    op.drop_table('secret')
     # ### end Alembic commands ###
 
 
@@ -428,6 +483,43 @@ def downgrade() -> None:
     sa.PrimaryKeyConstraint('id', name='secret_pkey'),
     sa.UniqueConstraint('name', 'key_uuid', name='name_key_uuid_uc')
     )
+    op.create_table('backfill',
+    sa.Column('id', sa.INTEGER(), server_default=sa.text("nextval('backfill_id_seq'::regclass)"), autoincrement=True, nullable=False),
+    sa.Column('block_uuid', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('completed_at', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
+    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('end_datetime', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
+    sa.Column('failed_at', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
+    sa.Column('interval_type', postgresql.INTERVAL(), autoincrement=False, nullable=True),
+    sa.Column('interval_units', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('metrics', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
+    sa.Column('name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('pipeline_schedule_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('pipeline_uuid', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('start_datetime', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
+    sa.Column('started_at', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
+    sa.Column('status', postgresql.ENUM('INITIAL', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', name='status'), autoincrement=False, nullable=True),
+    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('variables', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
+    sa.Column('settings', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
+    sa.ForeignKeyConstraint(['pipeline_schedule_id'], ['pipeline_schedule.id'], name='backfill_pipeline_schedule_id_fkey'),
+    sa.PrimaryKeyConstraint('id', name='backfill_pkey'),
+    postgresql_ignore_search_path=False
+    )
+    op.create_table('block_run',
+    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
+    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('pipeline_run_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('block_uuid', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('status', postgresql.ENUM('INITIAL', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'UPSTREAM_FAILED', 'CONDITION_FAILED', name='blockrunstatus'), autoincrement=False, nullable=True),
+    sa.Column('completed_at', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
+    sa.Column('started_at', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
+    sa.Column('metrics', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
+    sa.ForeignKeyConstraint(['pipeline_run_id'], ['pipeline_run.id'], name='block_run_pipeline_run_id_fkey'),
+    sa.PrimaryKeyConstraint('id', name='block_run_pkey')
+    )
+    op.create_index('ix_block_run_pipeline_run_id', 'block_run', ['pipeline_run_id'], unique=False)
     op.create_table('oauth2_application',
     sa.Column('id', sa.INTEGER(), server_default=sa.text("nextval('oauth2_application_id_seq'::regclass)"), autoincrement=True, nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
@@ -443,39 +535,53 @@ def downgrade() -> None:
     postgresql_ignore_search_path=False
     )
     op.create_index('ix_oauth2_application_client_id', 'oauth2_application', ['client_id'], unique=True)
-    op.create_table('block_run',
+    op.create_table('event_matcher',
+    sa.Column('id', sa.INTEGER(), server_default=sa.text("nextval('event_matcher_id_seq'::regclass)"), autoincrement=True, nullable=False),
+    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('event_type', postgresql.ENUM('AWS_EVENT', name='eventtype'), autoincrement=False, nullable=True),
+    sa.Column('name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('pattern', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
+    sa.PrimaryKeyConstraint('id', name='event_matcher_pkey'),
+    postgresql_ignore_search_path=False
+    )
+    op.create_table('pipeline_schedule_event_matcher_association',
+    sa.Column('pipeline_schedule_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('event_matcher_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.ForeignKeyConstraint(['event_matcher_id'], ['event_matcher.id'], name='pipeline_schedule_event_matcher_associati_event_matcher_id_fkey'),
+    sa.ForeignKeyConstraint(['pipeline_schedule_id'], ['pipeline_schedule.id'], name='pipeline_schedule_event_matcher_assoc_pipeline_schedule_id_fkey')
+    )
+    op.create_table('permission',
+    sa.Column('id', sa.INTEGER(), server_default=sa.text("nextval('permission_id_seq'::regclass)"), autoincrement=True, nullable=False),
+    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('entity_id', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('entity', postgresql.ENUM('GLOBAL', 'PROJECT', 'PIPELINE', name='entity'), autoincrement=False, nullable=True),
+    sa.Column('access', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('role_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('user_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('entity_name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('entity_type', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('options', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
+    sa.ForeignKeyConstraint(['role_id'], ['role.id'], name='permission_role_id_fkey'),
+    sa.ForeignKeyConstraint(['user_id'], ['user.id'], name='permission_user_id'),
+    sa.PrimaryKeyConstraint('id', name='permission_pkey'),
+    postgresql_ignore_search_path=False
+    )
+    op.create_table('oauth2_access_token',
     sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
     sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('pipeline_run_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('block_uuid', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('status', postgresql.ENUM('INITIAL', 'QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'UPSTREAM_FAILED', 'CONDITION_FAILED', name='blockrunstatus'), autoincrement=False, nullable=True),
-    sa.Column('completed_at', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
-    sa.Column('started_at', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
-    sa.Column('metrics', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
-    sa.ForeignKeyConstraint(['pipeline_run_id'], ['pipeline_run.id'], name='block_run_pipeline_run_id_fkey'),
-    sa.PrimaryKeyConstraint('id', name='block_run_pkey')
+    sa.Column('expires', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
+    sa.Column('oauth2_application_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('token', sa.TEXT(), autoincrement=False, nullable=True),
+    sa.Column('user_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('refresh_token', sa.TEXT(), autoincrement=False, nullable=True),
+    sa.ForeignKeyConstraint(['oauth2_application_id'], ['oauth2_application.id'], name='oauth2_access_token_oauth2_application_id_fkey'),
+    sa.ForeignKeyConstraint(['user_id'], ['user.id'], name='oauth2_access_token_user_id_fkey'),
+    sa.PrimaryKeyConstraint('id', name='oauth2_access_token_pkey')
     )
-    op.create_index('ix_block_run_pipeline_run_id', 'block_run', ['pipeline_run_id'], unique=False)
-    op.create_table('user',
-    sa.Column('id', sa.INTEGER(), server_default=sa.text("nextval('user_id_seq'::regclass)"), autoincrement=True, nullable=False),
-    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('avatar', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('email', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('first_name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('last_name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('owner', sa.BOOLEAN(), autoincrement=False, nullable=True),
-    sa.Column('password_hash', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('password_salt', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('roles', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('username', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('preferences', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
-    sa.PrimaryKeyConstraint('id', name='user_pkey'),
-    postgresql_ignore_search_path=False
-    )
-    op.create_index('ix_user_username', 'user', ['username'], unique=True)
-    op.create_index('ix_user_email', 'user', ['email'], unique=True)
+    op.create_index('ix_oauth2_access_token_token', 'oauth2_access_token', ['token'], unique=True)
     op.create_table('pipeline_run',
     sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
@@ -501,6 +607,57 @@ def downgrade() -> None:
     op.create_index('ix_pipeline_run_pipeline_schedule_id', 'pipeline_run', ['pipeline_schedule_id'], unique=False)
     op.create_index('ix_pipeline_run_execution_date', 'pipeline_run', ['execution_date'], unique=False)
     op.create_index('ix_pipeline_run_backfill_id', 'pipeline_run', ['backfill_id'], unique=False)
+    op.create_table('user_role',
+    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
+    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('user_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('role_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.ForeignKeyConstraint(['role_id'], ['role.id'], name='user_role_role_id_fkey'),
+    sa.ForeignKeyConstraint(['user_id'], ['user.id'], name='user_role_user_id_fkey'),
+    sa.PrimaryKeyConstraint('id', name='user_role_pkey')
+    )
+    op.create_table('user_project',
+    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
+    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('user_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('root_project_uuid', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('project_name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('active', sa.BOOLEAN(), autoincrement=False, nullable=True),
+    sa.ForeignKeyConstraint(['user_id'], ['user.id'], name='user_project_user_id_fkey'),
+    sa.PrimaryKeyConstraint('id', name='user_project_pkey')
+    )
+    op.create_table('user',
+    sa.Column('id', sa.INTEGER(), server_default=sa.text("nextval('user_id_seq'::regclass)"), autoincrement=True, nullable=False),
+    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('avatar', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('email', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('first_name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('last_name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('owner', sa.BOOLEAN(), autoincrement=False, nullable=True),
+    sa.Column('password_hash', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('password_salt', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('roles', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('username', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('preferences', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
+    sa.PrimaryKeyConstraint('id', name='user_pkey'),
+    postgresql_ignore_search_path=False
+    )
+    op.create_index('ix_user_username', 'user', ['username'], unique=True)
+    op.create_index('ix_user_email', 'user', ['email'], unique=True)
+    op.create_table('role',
+    sa.Column('id', sa.INTEGER(), server_default=sa.text("nextval('role_id_seq'::regclass)"), autoincrement=True, nullable=False),
+    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
+    sa.Column('user_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.ForeignKeyConstraint(['user_id'], ['user.id'], name='role_user_id'),
+    sa.PrimaryKeyConstraint('id', name='role_pkey'),
+    postgresql_ignore_search_path=False
+    )
+    op.create_index('ix_role_name', 'role', ['name'], unique=True)
     op.create_table('tag_association',
     sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
@@ -522,8 +679,20 @@ def downgrade() -> None:
     sa.PrimaryKeyConstraint('id', name='tag_pkey')
     )
     op.create_index('ix_tag_name', 'tag', ['name'], unique=True)
+    op.create_table('role_permission',
+    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
+    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
+    sa.Column('permission_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('role_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.Column('user_id', sa.INTEGER(), autoincrement=False, nullable=True),
+    sa.ForeignKeyConstraint(['permission_id'], ['permission.id'], name='role_permission_permission_id_fkey'),
+    sa.ForeignKeyConstraint(['role_id'], ['role.id'], name='role_permission_role_id_fkey'),
+    sa.ForeignKeyConstraint(['user_id'], ['user.id'], name='role_permission_user_id_fkey'),
+    sa.PrimaryKeyConstraint('id', name='role_permission_pkey')
+    )
     op.create_table('pipeline_schedule',
-    sa.Column('id', sa.INTEGER(), server_default=sa.text("nextval('pipeline_schedule_id_seq'::regclass)"), autoincrement=True, nullable=False),
+    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
     sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
     sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
     sa.Column('name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
@@ -540,124 +709,14 @@ def downgrade() -> None:
     sa.Column('global_data_product_uuid', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
     sa.Column('description', sa.TEXT(), autoincrement=False, nullable=True),
     sa.Column('last_enabled_at', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
-    sa.PrimaryKeyConstraint('id', name='pipeline_schedule_pkey'),
-    postgresql_ignore_search_path=False
+    sa.PrimaryKeyConstraint('id', name='pipeline_schedule_pkey')
     )
     op.create_index('ix_pipeline_schedule_token', 'pipeline_schedule', ['token'], unique=False)
     op.create_index('ix_pipeline_schedule_pipeline_uuid', 'pipeline_schedule', ['pipeline_uuid'], unique=False)
     op.create_index('ix_pipeline_schedule_global_data_product_uuid', 'pipeline_schedule', ['global_data_product_uuid'], unique=False)
-    op.create_table('user_project',
-    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
-    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('user_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('root_project_uuid', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('project_name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('active', sa.BOOLEAN(), autoincrement=False, nullable=True),
-    sa.ForeignKeyConstraint(['user_id'], ['user.id'], name='user_project_user_id_fkey'),
-    sa.PrimaryKeyConstraint('id', name='user_project_pkey')
-    )
-    op.create_table('role',
-    sa.Column('id', sa.INTEGER(), server_default=sa.text("nextval('role_id_seq'::regclass)"), autoincrement=True, nullable=False),
-    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('user_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.ForeignKeyConstraint(['user_id'], ['user.id'], name='role_user_id'),
-    sa.PrimaryKeyConstraint('id', name='role_pkey'),
-    postgresql_ignore_search_path=False
-    )
-    op.create_index('ix_role_name', 'role', ['name'], unique=True)
-    op.create_table('backfill',
-    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
-    sa.Column('block_uuid', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('completed_at', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
-    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('end_datetime', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
-    sa.Column('failed_at', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
-    sa.Column('interval_type', postgresql.INTERVAL(), autoincrement=False, nullable=True),
-    sa.Column('interval_units', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('metrics', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
-    sa.Column('name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('pipeline_schedule_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('pipeline_uuid', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('start_datetime', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
-    sa.Column('started_at', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
-    sa.Column('status', postgresql.ENUM('INITIAL', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', name='status'), autoincrement=False, nullable=True),
-    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('variables', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
-    sa.Column('settings', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
-    sa.ForeignKeyConstraint(['pipeline_schedule_id'], ['pipeline_schedule.id'], name='backfill_pipeline_schedule_id_fkey'),
-    sa.PrimaryKeyConstraint('id', name='backfill_pkey')
-    )
-    op.create_table('event_matcher',
-    sa.Column('id', sa.INTEGER(), server_default=sa.text("nextval('event_matcher_id_seq'::regclass)"), autoincrement=True, nullable=False),
-    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('event_type', postgresql.ENUM('AWS_EVENT', name='eventtype'), autoincrement=False, nullable=True),
-    sa.Column('name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('pattern', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
-    sa.PrimaryKeyConstraint('id', name='event_matcher_pkey'),
-    postgresql_ignore_search_path=False
-    )
-    op.create_table('oauth2_access_token',
-    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
-    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('expires', postgresql.TIMESTAMP(timezone=True), autoincrement=False, nullable=True),
-    sa.Column('oauth2_application_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('token', sa.TEXT(), autoincrement=False, nullable=True),
-    sa.Column('user_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('refresh_token', sa.TEXT(), autoincrement=False, nullable=True),
-    sa.ForeignKeyConstraint(['oauth2_application_id'], ['oauth2_application.id'], name='oauth2_access_token_oauth2_application_id_fkey'),
-    sa.ForeignKeyConstraint(['user_id'], ['user.id'], name='oauth2_access_token_user_id_fkey'),
-    sa.PrimaryKeyConstraint('id', name='oauth2_access_token_pkey')
-    )
-    op.create_index('ix_oauth2_access_token_token', 'oauth2_access_token', ['token'], unique=True)
-    op.create_table('role_permission',
-    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
-    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('permission_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('role_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('user_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.ForeignKeyConstraint(['permission_id'], ['permission.id'], name='role_permission_permission_id_fkey'),
-    sa.ForeignKeyConstraint(['role_id'], ['role.id'], name='role_permission_role_id_fkey'),
-    sa.ForeignKeyConstraint(['user_id'], ['user.id'], name='role_permission_user_id_fkey'),
-    sa.PrimaryKeyConstraint('id', name='role_permission_pkey')
-    )
-    op.create_table('pipeline_schedule_event_matcher_association',
-    sa.Column('pipeline_schedule_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('event_matcher_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.ForeignKeyConstraint(['event_matcher_id'], ['event_matcher.id'], name='pipeline_schedule_event_matcher_associati_event_matcher_id_fkey'),
-    sa.ForeignKeyConstraint(['pipeline_schedule_id'], ['pipeline_schedule.id'], name='pipeline_schedule_event_matcher_assoc_pipeline_schedule_id_fkey')
-    )
-    op.create_table('permission',
-    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
-    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('entity_id', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('entity', postgresql.ENUM('GLOBAL', 'PROJECT', 'PIPELINE', name='entity'), autoincrement=False, nullable=True),
-    sa.Column('access', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('role_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('user_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('entity_name', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('entity_type', sa.VARCHAR(length=255), autoincrement=False, nullable=True),
-    sa.Column('options', postgresql.JSON(astext_type=sa.Text()), autoincrement=False, nullable=True),
-    sa.ForeignKeyConstraint(['role_id'], ['role.id'], name='permission_role_id_fkey'),
-    sa.ForeignKeyConstraint(['user_id'], ['user.id'], name='permission_user_id'),
-    sa.PrimaryKeyConstraint('id', name='permission_pkey')
-    )
-    op.create_table('user_role',
-    sa.Column('id', sa.INTEGER(), autoincrement=True, nullable=False),
-    sa.Column('created_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('updated_at', postgresql.TIMESTAMP(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), autoincrement=False, nullable=True),
-    sa.Column('user_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.Column('role_id', sa.INTEGER(), autoincrement=False, nullable=True),
-    sa.ForeignKeyConstraint(['role_id'], ['role.id'], name='user_role_role_id_fkey'),
-    sa.ForeignKeyConstraint(['user_id'], ['user.id'], name='user_role_user_id_fkey'),
-    sa.PrimaryKeyConstraint('id', name='user_role_pkey')
-    )
+    op.drop_index(op.f('ix_research_tasks_request_id'), table_name='research_tasks')
+    op.drop_index(op.f('ix_research_tasks_id'), table_name='research_tasks')
+    op.drop_table('research_tasks')
     op.drop_index(op.f('ix_instagram_scraping_jobs_id'), table_name='instagram_scraping_jobs')
     op.drop_table('instagram_scraping_jobs')
     op.drop_index(op.f('ix_instagram_image_colors_id'), table_name='instagram_image_colors')
@@ -685,6 +744,9 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_business_progress_id'), table_name='business_progress')
     op.drop_index(op.f('ix_business_progress_business_id'), table_name='business_progress')
     op.drop_table('business_progress')
+    op.drop_index(op.f('ix_business_models_id'), table_name='business_models')
+    op.drop_index(op.f('ix_business_models_business_id'), table_name='business_models')
+    op.drop_table('business_models')
     op.drop_index(op.f('ix_business_canvas_id'), table_name='business_canvas')
     op.drop_table('business_canvas')
     op.drop_index(op.f('ix_multi_account_sentiment_overview_id'), table_name='multi_account_sentiment_overview')

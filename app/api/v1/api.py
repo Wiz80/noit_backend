@@ -8,7 +8,8 @@ from app.api.v1.endpoints.business.competitive_analysis import (
     social_media, 
     instagram_comments, 
     instagram_analyzer, 
-    instagram_statistics
+    instagram_statistics,
+    linkedin
 )
 from app.api.v1.endpoints.business.webhooks import research_callback
 from app.api.v1.endpoints.business.business_understanding.business_model import router as business_model_router
@@ -44,6 +45,11 @@ api_router.include_router(
     instagram_statistics.router,
     prefix="/analyze-competitors/instagram-statistics",
     tags=["instagram-statistics-analysis"]
+)
+api_router.include_router(
+    linkedin.router,
+    prefix="/analyze-competitors/linkedin",
+    tags=["linkedin-competitor-analysis"]
 )
 api_router.include_router(
     research_callback.router,

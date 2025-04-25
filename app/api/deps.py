@@ -58,10 +58,14 @@ def get_minio_client() -> MinioService:
     """
     Returns a MinioService instance for handling object storage operations.
     Uses a singleton pattern to avoid multiple initializations.
+    The client connection is only established when the actual MinIO operations are performed.
     """
     global _minio_service_instance
     if _minio_service_instance is None:
+        # Just create the service object without connecting to MinIO
+        # The actual connection will be established on first use
         _minio_service_instance = MinioService(bucket_name="lattice-businesses")
+        logging.info("MinioService instance created (lazy loading - not connected yet)")
     return _minio_service_instance
 
 # Create a singleton instance of RedisChatService

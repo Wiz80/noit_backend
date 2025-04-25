@@ -1,8 +1,8 @@
-# Lattice
+# Noit
 
 ## Project Overview
 
-Lattice is an AI-powered platform designed to help entrepreneurs understand, structure, and execute their business ideas. The platform leverages AI agents to guide entrepreneurs through the process of developing their business ideas, creating strategies, and scaling their ventures.
+Noit is an AI-powered platform designed to help entrepreneurs understand, structure, and execute their business ideas. The platform leverages AI agents to guide entrepreneurs through the process of developing their business ideas, creating strategies, and scaling their ventures.
 
 ## Problem Statement
 
@@ -11,8 +11,11 @@ Many entrepreneurs struggle with the practical aspects of executing a business i
 - Creating effective marketing strategies
 - Building an audience
 - Scaling the business
+- Understanding market dynamics
+- Validating business hypotheses
+- Developing competitive strategies
 
-Lattice addresses these challenges by providing AI-driven guidance and tools that help entrepreneurs bring their ideas to life.
+Noit addresses these challenges by providing AI-driven guidance and tools that help entrepreneurs bring their ideas to life.
 
 ## Key Features
 
@@ -20,18 +23,23 @@ Lattice addresses these challenges by providing AI-driven guidance and tools tha
 - **Business Understanding**: Analyze and refine your business model with AI-powered insights
 - **Business Canvas Generation**: Create a comprehensive business canvas based on specific objectives
 - **Competitor Analysis**: Research and analyze competitors in your market
-- **State of Art Analysis**: Understand the current market landscape (in development)
+- **State of Art Analysis**: Understand the current market landscape and industry trends
 - **Social Media Competitor Analysis**: Analyze competitors' Instagram profiles and content
 - **Interactive Business Validation Chat**: Engage in a conversational process to validate your business idea through a structured methodology
+- **Market Research**: Conduct in-depth market research using AI-powered tools
+- **Strategy Development**: Create actionable business strategies based on validated insights
+- **Progress Tracking**: Monitor and track the development of your business idea through different stages
 
 ## Architecture
 
-Lattice is built using FastAPI for the backend, with a modular architecture that separates concerns into:
+Noit is built using FastAPI for the backend, with a modular architecture that separates concerns into:
 - API endpoints
 - Business logic services
 - Data models
 - Storage services (MinIO for object storage)
 - Cache services (Redis for conversation management)
+- Task queues (Celery for background processing)
+- Event bus (Redis Pub/Sub for real-time updates)
 
 ## Installation
 
@@ -47,8 +55,8 @@ Lattice is built using FastAPI for the backend, with a modular architecture that
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/lattice.git
-cd lattice
+git clone https://github.com/yourusername/noit.git
+cd noit
 ```
 
 2. Create and activate a virtual environment:
@@ -261,7 +269,7 @@ The Business Validation Chat provides a structured, conversational approach to v
 ### Project Structure
 
 ```
-lattice/
+noit/
 ├── app/
 │   ├── api/              # API endpoints
 │   │   └── v1/
@@ -278,84 +286,71 @@ lattice/
 │   ├── services/         # Business logic services
 │   │   ├── business/     # Business-related services
 │   │   ├── cache/        # Cache services (Redis)
-│   │   └── storage/      # Storage services (MinIO)
+│   │   ├── storage/      # Storage services (MinIO)
+│   │   ├── queue/        # Task queue services (Celery)
+│   │   └── events/       # Event handling services
 │   └── utils/            # Utility functions
 ├── alembic/              # Database migrations
 ├── config/               # Configuration files
 ├── tests/                # Test cases
-├── manage.py             # Management script
-├── docker-compose.yaml   # Docker Compose configuration
-└── requirements.txt      # Python dependencies
+│   ├── unit/            # Unit tests
+│   ├── integration/     # Integration tests
+│   └── e2e/            # End-to-end tests
+├── scripts/             # Utility scripts
+├── manage.py            # Management script
+├── docker-compose.yaml  # Docker Compose configuration
+└── requirements.txt     # Python dependencies
 ```
 
-### Management Commands
-
-The application includes a CLI management script (`manage.py`) with the following commands:
-
-- `python manage.py runserver`: Run the FastAPI development server
-- `python manage.py db_init`: Initialize the database
-- `python manage.py db_migrate "message"`: Create a new database migration
-- `python manage.py db_upgrade`: Upgrade database to the latest version
-- `python manage.py db_downgrade`: Downgrade database to a specific revision
-
-### Testing
-
-#### Running Tests
+### Running Tests
 
 ```bash
+# Run all tests
 pytest
+
+# Run specific test categories
+pytest tests/unit
+pytest tests/integration
+pytest tests/e2e
+
+# Run tests with coverage report
+pytest --cov=app tests/
+
+# Run tests in parallel
+pytest -n auto
 ```
 
-#### Testing State of Art Analysis
+### Development Guidelines
 
-The state-of-art analysis endpoint can be computationally intensive due to the number of questions it processes. For testing purposes, you can use the `test_mode` parameter to limit the number of questions processed:
+1. **Code Style**
+   - Follow PEP 8 guidelines
+   - Use type hints
+   - Write comprehensive docstrings
+   - Keep functions focused and small
 
-```bash
-# Run the test script with a specific business ID
-python scripts/test_state_of_art.py <business_id>
+2. **Testing**
+   - Write unit tests for all new features
+   - Maintain test coverage above 80%
+   - Include integration tests for API endpoints
+   - Add end-to-end tests for critical flows
 
-# Specify test_mode and test_questions_limit
-python scripts/test_state_of_art.py <business_id> true 2
-```
+3. **Documentation**
+   - Update README.md for new features
+   - Document all API endpoints
+   - Include example requests and responses
+   - Keep architecture diagrams up to date
 
-This will process only the first 2 questions from each category, allowing you to verify that the process is working correctly without the full computational load.
+4. **Version Control**
+   - Use feature branches
+   - Write meaningful commit messages
+   - Follow conventional commits format
+   - Review code before merging
 
-### Instagram Scraper Tests
-
-To test the Instagram comment scraping functionality, we've provided a dedicated script:
-
-```bash
-# Run the Instagram comments scraper test
-./scripts/test_instagram_comments.py
-```
-
-This script:
-- Searches for Instagram posts from a specific username ("bulldogskincare" by default)
-- Provides an interactive interface to select posts and configure parameters
-- Tests the `scrape_instagram_comments` method using real data from the database
-- Displays detailed results of the scraping process
-
-#### Requirements
-
-To run this test script, you need:
-- Properly configured `.env` file with a valid APIFY_API_KEY
-- Database connection with Instagram user and post data
-- A working internet connection
-
-### Business Chat Test
-
-To test the business chat functionality, you can use the following script:
-
-```bash
-# Test the business chat with a specific business idea ID
-python scripts/test_business_chat.py <business_id>
-```
-
-This script:
-- Initializes a chat session for the specified business idea
-- Simulates a conversation with predefined responses
-- Tests the progression through all stages of the validation process
-- Generates and displays a summary of the validation
+5. **Performance**
+   - Profile code for bottlenecks
+   - Optimize database queries
+   - Use caching appropriately
+   - Monitor resource usage
 
 ## Environment Variables
 
@@ -371,7 +366,7 @@ POSTGRES_SERVER=localhost
 POSTGRES_USER=postgres
 POSTGRES_PORT=5432
 POSTGRES_PASSWORD=password
-POSTGRES_DB=lattice
+POSTGRES_DB=noit
 
 # MinIO
 MINIO_ROOT_USER=minioadmin
@@ -390,12 +385,214 @@ OPENAI_API_KEY=your-openai-api-key
 PERPLEXITY_API_KEY=your-perplexity-api-key
 APIFY_API_KEY=your-apify-api-key
 DEEPSEEK_API_KEY=your-deepseek-api-key
+ANTHROPIC_API_KEY=your-anthropic-api-key
+
+# Celery
+CELERY_BROKER_URL=redis://localhost:6379/1
+CELERY_RESULT_BACKEND=redis://localhost:6379/1
+
+# Application
+DEBUG=True
+ENVIRONMENT=development
+LOG_LEVEL=INFO
 ```
 
 ## License
 
-This project is licensed under the terms of the license included in the LICENSE file.
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. 
+We welcome contributions! Please follow these steps:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Write or update tests
+5. Update documentation
+6. Submit a pull request
+
+For major changes, please open an issue first to discuss what you would like to change.
+
+# Noit Backend
+
+Backend services for the Noit platform.
+
+## LinkedIn Ads Scraper
+
+The LinkedIn Ads Scraper is a custom solution for extracting ad data from the LinkedIn Ad Library. It uses ScrapeGraphAI with the SmartScraperGraph component to intelligently extract ad information.
+
+### Features
+
+- Extract ad data from LinkedIn Ad Library using AI-powered scraping
+- Support for various search filters (company, date range, countries, etc.)
+- Automatic detection of CSS selectors to handle LinkedIn page structure changes
+- Robust error handling with automatic retries
+- Detection of login walls and other potential issues
+- Two-tiered approach: direct Playwright extraction with SmartScraperGraph fallback
+- Extracts comprehensive ad information including:
+  - Ad ID
+  - Advertiser logo
+  - Ad text
+  - Call-to-action (CTAs)
+  - Advertiser name and URL
+  - Ad format
+  - Paid by information
+  - Media URLs (images/videos)
+  - Source URL
+
+### Usage
+
+To use the LinkedIn Ads Scraper in your application:
+
+```python
+from app.services.business.competitive_analysis.linkedin.linkedin_ads_service import LinkedInAdsService
+
+# Initialize the service
+ads_service = LinkedInAdsService(
+    llm_provider="openai",
+    llm_model="gpt-3.5-turbo"
+)
+
+# Extract ads for competitors
+result = await ads_service.extract_competitor_ads_data(
+    business_idea_id="your-business-idea-id",
+    db=db_session,
+    date_option="last-30-days",
+    max_results_per_competitor=50,
+    detect_selectors=True  # Enable automatic CSS selector detection
+)
+```
+
+For direct ad extraction without database integration:
+
+```python
+from app.services.scrape.linkedin_ads_scraper import extract_ads_from_linkedin
+
+# Create search URL for a specific company
+search_url = "https://www.linkedin.com/ad-library/search?accountOwner=Microsoft&dateOption=last-30-days"
+
+# Extract ads data with automatic selector detection
+ads_data = await extract_ads_from_linkedin(
+    search_url=search_url,
+    max_results=50,
+    detect_selectors=True
+)
+
+# Check for warnings or issues
+if "warnings" in ads_data:
+    for warning in ads_data["warnings"]:
+        print(f"Warning: {warning}")
+```
+
+### Advanced Usage
+
+For more control over the scraping process, you can use the `LinkedInAdsScraper` class directly:
+
+```python
+from app.services.scrape.linkedin_ads_scraper import LinkedInAdsScraper
+
+# Create a scraper with custom settings
+scraper = LinkedInAdsScraper(
+    llm_provider="openai",
+    llm_model="gpt-3.5-turbo",
+    headless=True,
+    verbose=True,
+    max_retries=3,
+    retry_delay=5,
+    custom_selectors={
+        "ad_container": ".custom-ad-selector"  # Override default selectors
+    }
+)
+
+# Detect optimal selectors for current LinkedIn structure
+updated_selectors = await scraper.detect_optimal_selectors(search_url)
+scraper.selectors = updated_selectors
+
+# Extract ads
+ads_data = await scraper.extract_ads_data(search_url, max_results=100)
+```
+
+### Testing
+
+A test script is provided to verify the scraper's functionality:
+
+```bash
+python app/services/scrape/examples/test_linkedin_ads_scraper.py
+```
+
+This will detect optimal selectors, extract sample ads from a predefined company, and save the results to the `output` directory.
+
+### Setup
+
+To install the required dependencies:
+
+```bash
+python app/services/scrape/setup_scraper.py
+```
+
+This script will install the necessary packages and set up the environment.
+
+## Requirements
+
+- Python 3.8+
+- OpenAI API key (set as environment variable `OPENAI_API_KEY`)
+- Required packages:
+  - scrapegraphai
+  - playwright
+  - aiohttp
+  - python-dotenv
+  - sqlalchemy
+  - minio
+
+## LinkedIn Ads Analysis
+
+The application provides two services for analyzing LinkedIn ads:
+
+### 1. LinkedInAdsService
+
+Custom implementation that uses a scraper to extract ads data from LinkedIn's Ad Library.
+
+### 2. ApifyLinkedInAdsService
+
+Integration with Apify's LinkedIn Ad scraper actor (ID: 31BPULiLZ42ca1mvj) for more robust ad extraction.
+
+#### Setup
+
+1. Set your Apify API token in the environment:
+   ```
+   APIFY_API_TOKEN=your_apify_token
+   ```
+
+2. Usage example:
+   ```python
+   from app.services.business.competitive_analysis.linkedin.linkedin_ads_service import ApifyLinkedInAdsService
+   
+   # Initialize the service
+   service = ApifyLinkedInAdsService()
+   
+   # Search for ads by URL
+   search_url = service.build_search_url(
+       account_owner="company_name",
+       countries=["US"],
+       date_option="last-30-days",
+       keyword="product"
+   )
+   ads_data = await service.fetch_ads_data(search_url)
+   
+   # Or extract ads for all competitors of a business idea
+   results = await service.extract_competitor_ads_data(
+       business_idea_id="your_business_idea_id",
+       db=db_session,
+       date_option="last-30-days"
+   )
+   ```
+
+#### Parameters
+
+The service supports all parameters provided by the Apify actor, including:
+- `type_search`: "search_url" or "company"
+- `limit`: Maximum number of ads to retrieve
+- `countries`: Filter by country codes
+- `date_option`: Time range for ads (last-30-days, this-month, etc.)
+- `keyword`: Keyword to search for in ads 

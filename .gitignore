@@ -1,0 +1,13 @@
+venv
+
+.env
+
+__pycache__
+
+.DS_Store
+
+*.json
+
+.cursorrules
+
+*.pdf

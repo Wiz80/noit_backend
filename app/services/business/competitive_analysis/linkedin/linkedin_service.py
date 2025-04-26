@@ -54,7 +54,8 @@ class LinkedInService:
             company_result = await self.company_scraper.scrape(
                 company_name=linkedin_url, 
                 isUrl=True, 
-                **kwargs
+                limit=kwargs.get("limit", 20),
+                proxy_country=kwargs.get("proxy_country", "US")
             )
             
             if company_result["success"] and company_result["count"] > 0:

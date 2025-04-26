@@ -11,13 +11,13 @@ logger = logging.getLogger(__name__)
 
 class LinkedInCompanyScraperService(LinkedInScraperBase):
     """
-    Service to scrape LinkedIn company data using Apify's LinkedIn Premium Actor
-    Actor ID: bebity/linkedin-premium-actor
+    Service to scrape LinkedIn company data using Apify's LinkedIn Actor
+    Actor ID: od6RadQV98FOARtrp (Apify recommended LinkedIn actor)
     """
     
     def __init__(self):
         super().__init__()
-        self.actor_id = "bebity/linkedin-premium-actor"
+        self.actor_id = "od6RadQV98FOARtrp"  # Updated to recommended Apify actor
         
     async def scrape(self, company_name: str, location: Optional[str] = None, isUrl: bool = False, **kwargs) -> Dict[str, Any]:
         """
@@ -32,28 +32,29 @@ class LinkedInCompanyScraperService(LinkedInScraperBase):
             Dict containing scraped data or error information
         """
         try:
-            # Prepare the Actor input
+            # Prepare the Actor input based on Apify's recommended configuration
             run_input = {
-                "action": "get-companies",
+                "action": "get-companies",  # Use get-companies for company profiles
                 "isName": not isUrl,
                 "isUrl": isUrl,
-                "keywords": [company_name] if not isUrl else [],
+                "keywords": [] if isUrl else [company_name],
                 "urls": [company_name] if isUrl else [],
+                "limit": kwargs.get("limit", 20)  # Increased default limit to 20
             }
             
             # Add location if provided
             if location:
                 run_input["location"] = [location]
                 
-            # Add proxy configuration if needed
-            if kwargs.get("use_proxy", True):
-                run_input["proxy"] = {
-                    "useApifyProxy": True,
-                    "apifyProxyCountry": kwargs.get("proxy_country", "US"),
-                }
+            # Add proxy configuration
+            run_input["proxy"] = {
+                "useApifyProxy": True,
+                "apifyProxyCountry": kwargs.get("proxy_country", "US"),
+            }
             
             # Run the Actor and wait for it to finish
             logger.info(f"Starting LinkedIn company scrape for: {company_name}")
+            logger.info(f"Using run input: {json.dumps(run_input)}")
             run = self.client.actor(self.actor_id).call(run_input=run_input)
             
             # Fetch Actor results from the run's dataset

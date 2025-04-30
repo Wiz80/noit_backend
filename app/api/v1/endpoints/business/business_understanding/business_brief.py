@@ -66,12 +66,12 @@ async def process_brief_message(
             "id": business.id,
             "title": business.title,
             "description": business.description,
-            "value_proposal": business.value_proposal,
-            "products_services": business.products_services,
-            "ideal_customer": business.ideal_customer,
-            "problem_solved": business.problem_solved,
-            "differentiators": business.differentiators,
-            "challenges_opportunities": business.challenges_opportunities
+            "value_proposal": getattr(business, 'value_proposal', None),
+            "products_services": getattr(business, 'products_services', None),
+            "ideal_customer": getattr(business, 'ideal_customer', None),
+            "problem_solved": getattr(business, 'problem_solved', None),
+            "differentiators": getattr(business, 'differentiators', None),
+            "challenges_opportunities": getattr(business, 'challenges_opportunities', None)
         }
         
         # Verificar si se proporciona un session_id existente
@@ -329,17 +329,23 @@ async def process_brief_message(
                     if question == "¿Qué hace la empresa? ¿Cuál es su propósito?":
                         business.description = answer
                     elif question == "¿Cuál es su propuesta de valor?":
-                        business.value_proposal = answer
+                        if hasattr(business, 'value_proposal'):
+                            business.value_proposal = answer
                     elif question == "¿Qué productos/servicios ofrece y a quiénes?":
-                        business.products_services = answer
+                        if hasattr(business, 'products_services'):
+                            business.products_services = answer
                     elif question == "¿Cuál es el cliente ideal?":
-                        business.ideal_customer = answer
+                        if hasattr(business, 'ideal_customer'):
+                            business.ideal_customer = answer
                     elif question == "¿Qué problema resuelve?":
-                        business.problem_solved = answer
+                        if hasattr(business, 'problem_solved'):
+                            business.problem_solved = answer
                     elif question == "¿Qué los hace diferentes frente a la competencia?":
-                        business.differentiators = answer
+                        if hasattr(business, 'differentiators'):
+                            business.differentiators = answer
                     elif question == "¿Qué desafíos u oportunidades clave enfrentan hoy?":
-                        business.challenges_opportunities = answer
+                        if hasattr(business, 'challenges_opportunities'):
+                            business.challenges_opportunities = answer
                     
                     # Guardar cambios en la base de datos
                     db.commit()
@@ -506,32 +512,32 @@ async def get_brief_report(
                     
             if "¿Cuál es su propuesta de valor?" in etapa1_answers:
                 answer = etapa1_answers["¿Cuál es su propuesta de valor?"]
-                if answer and answer != "Omitida":
+                if answer and answer != "Omitida" and hasattr(business, 'value_proposal'):
                     business.value_proposal = answer
                     
             if "¿Qué productos/servicios ofrece y a quiénes?" in etapa1_answers:
                 answer = etapa1_answers["¿Qué productos/servicios ofrece y a quiénes?"]
-                if answer and answer != "Omitida":
+                if answer and answer != "Omitida" and hasattr(business, 'products_services'):
                     business.products_services = answer
                     
             if "¿Cuál es el cliente ideal?" in etapa1_answers:
                 answer = etapa1_answers["¿Cuál es el cliente ideal?"]
-                if answer and answer != "Omitida":
+                if answer and answer != "Omitida" and hasattr(business, 'ideal_customer'):
                     business.ideal_customer = answer
                     
             if "¿Qué problema resuelve?" in etapa1_answers:
                 answer = etapa1_answers["¿Qué problema resuelve?"]
-                if answer and answer != "Omitida":
+                if answer and answer != "Omitida" and hasattr(business, 'problem_solved'):
                     business.problem_solved = answer
                     
             if "¿Qué los hace diferentes frente a la competencia?" in etapa1_answers:
                 answer = etapa1_answers["¿Qué los hace diferentes frente a la competencia?"]
-                if answer and answer != "Omitida":
+                if answer and answer != "Omitida" and hasattr(business, 'differentiators'):
                     business.differentiators = answer
                     
             if "¿Qué desafíos u oportunidades clave enfrentan hoy?" in etapa1_answers:
                 answer = etapa1_answers["¿Qué desafíos u oportunidades clave enfrentan hoy?"]
-                if answer and answer != "Omitida":
+                if answer and answer != "Omitida" and hasattr(business, 'challenges_opportunities'):
                     business.challenges_opportunities = answer
             
             # Guardar todos los cambios

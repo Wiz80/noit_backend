@@ -354,8 +354,8 @@
 
     <script>
         // ======= Configuración =======
-        // ¡IMPORTANTE! Esta URL apunta directamente al backend en el puerto 8000
-        const API_URL = 'http://localhost:8000/api/v1';
+        // ¡IMPORTANTE! Esta URL apunta al backend a través de nginx
+        const API_URL = '/api/v1';
         
         // ======= Estado =======
         const state = {
@@ -415,7 +415,8 @@
                 const response = await fetch(`${API_URL}/business-idea/`, {
                     headers: {
                         'Authorization': `Bearer ${state.token}`
-                    }
+                    },
+                    credentials: 'include'
                 });
 
                 debug(`Response status: ${response.status} ${response.statusText}`);
@@ -453,6 +454,7 @@
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${state.token}`
                     },
+                    credentials: 'include',
                     body: JSON.stringify(payload)
                 });
                 
@@ -487,7 +489,8 @@
                 const response = await fetch(`${API_URL}/business-model/${businessId}/sessions`, {
                     headers: {
                         'Authorization': `Bearer ${state.token}`
-                    }
+                    },
+                    credentials: 'include'
                 });
 
                 if (!response.ok) {
@@ -510,7 +513,8 @@
                 const response = await fetch(`${API_URL}/business-model/${businessId}/report/${sessionId}`, {
                     headers: {
                         'Authorization': `Bearer ${state.token}`
-                    }
+                    },
+                    credentials: 'include'
                 });
 
                 if (!response.ok) {

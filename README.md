@@ -170,6 +170,17 @@ python manage.py runserver
 - **Description**: Analyzes competitors based on the business model, extracting key questions and performing competitor research
 - **Required Fields**: language, validator_provider, validator_model, search_prompt
 
+#### LinkedIn Ads Competitor Analysis
+- **Endpoint**: `POST /api/v1/competitor-analysis/linkedin/{business_id}`
+- **Description**: Scrapes and analyzes LinkedIn ads for competitors
+- **Parameters**:
+  - `competitors` (optional): List of specific competitor IDs to analyze
+  - `date_range_type` (optional): Time range for ads (options: "last-30-days", "this-month", "this-year", "last-year", "custom", default: "last-30-days")
+  - `date_start` (optional): Start date for custom range (required if date_range_type is "custom")
+  - `date_end` (optional): End date for custom range (required if date_range_type is "custom")
+  - `timeout_secs` (optional): Timeout in seconds for the Apify actor call (default: 600)
+- **Response**: Returns a task ID for tracking progress
+
 #### Instagram Competitor Analysis
 - **Endpoint**: `POST /api/v1/competitor-analysis/instagram/{business_id}`
 - **Description**: Initiates Instagram competitor analysis for all competitors associated with a business idea
@@ -590,4 +601,89 @@ Crear un archivo `.env` en la raíz del proyecto con las siguientes variables:
 DATABASE_URL=postgresql://user:password@localhost:5432/dbname
 SECRET_KEY=your_secret_key
 # Otras variables necesarias para tu aplicación
+```
+
+## LinkedIn Competitive Analysis
+
+### Overview
+
+The LinkedIn Competitive Analysis module provides comprehensive tools for analyzing competitors' LinkedIn presence. The module includes functions for:
+
+1. **Data Collection**: Scraping company profiles, posts, and ads from LinkedIn
+2. **NLP Analysis**: Applying Natural Language Processing to extract insights from text data
+3. **ML-Powered Insights**: Using Machine Learning for topic modeling and content analysis
+4. **Comparative Analysis**: Generating comparisons between multiple competitors
+
+### Features
+
+#### Data Collection
+- Company profile data (description, followers, industry, etc.)
+- Post content and engagement metrics
+- LinkedIn ad campaigns and targeting data
+
+#### Insights Generation
+- **Sentiment Analysis**: Analyze sentiment in posts and comments
+- **Keyword Extraction**: Identify key themes and terms 
+- **Topic Modeling**: Discover dominant topics in content
+- **Entity Recognition**: Extract organizations, people, and concepts
+- **Engagement Metrics**: Analyze interaction and audience response
+- **Content Distribution**: Understand content type effectiveness
+- **Ad Strategy**: Analyze advertising focus and targeting
+
+#### Recommendations
+- Automatically generates actionable recommendations based on analysis
+- Identifies content gaps and opportunities
+- Suggests engagement strategies based on competitor performance
+
+### API Endpoints
+
+#### Data Collection
+- `POST /api/v1/linkedin/competitor/{business_id}/{competitor_id}` - Scrape data for a specific competitor
+- `POST /api/v1/linkedin/business/{business_id}` - Scrape data for all competitors of a business
+- `GET /api/v1/linkedin/competitor/{business_id}/{competitor_id}/company` - Get company data
+- `GET /api/v1/linkedin/competitor/{business_id}/{competitor_id}/posts` - Get posts data
+- `GET /api/v1/linkedin/competitor/{business_id}/{competitor_id}/ads` - Get ads data
+
+#### Data Analysis
+- `POST /api/v1/linkedin/analyze/competitor/{business_id}/{competitor_id}` - Analyze specific competitor
+- `POST /api/v1/linkedin/analyze/business/{business_id}` - Analyze all competitors with comparison
+- `GET /api/v1/linkedin/analyze/competitor/{business_id}/{competitor_id}` - Get existing analysis
+- `GET /api/v1/linkedin/analyze/business/{business_id}` - Get existing business-wide analysis
+
+### Installation
+
+To install the required dependencies for LinkedIn analysis:
+
+```bash
+pip install -r requirements-linkedin-analysis.txt
+python -m spacy download en_core_web_sm
+```
+
+### Usage Example
+
+```python
+# Analyze LinkedIn data for a specific competitor
+response = client.post(
+    f"/api/v1/linkedin/analyze/competitor/{business_id}/{competitor_id}",
+    json={
+        "analysis_types": ["sentiment", "keywords", "topics", "engagement", "content", "ads"],
+        "force_refresh": False
+    }
+)
+
+# Get insights and recommendations
+insights = response.json()["insights"]
+recommendations = insights["recommendations"]
+
+# Get business-wide competitive analysis with comparisons
+business_analysis = client.post(
+    f"/api/v1/linkedin/analyze/business/{business_id}",
+    json={
+        "analysis_types": ["sentiment", "keywords", "topics", "engagement", "content", "ads"],
+        "include_comparison": True
+    }
+)
+
+# Access comparison data
+comparison = business_analysis.json()["comparison"]
 ``` 

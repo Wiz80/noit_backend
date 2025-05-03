@@ -330,7 +330,7 @@ async def get_posts_image_analysis(
         
         output_folder = f"{business_id}/competitor-analysis/instagram"
         minio_service = MinioService(bucket_name="lattice-businesses")
-        analysis_object_name = f"{output_folder}/{instagram_username}/image_analysis_report.json"
+        analysis_object_name = f"{output_folder}/{instagram_username}/posts_image_analysis_report.json"
         
         try:
             # Get JSON data from MinIO

@@ -1,36 +1,9 @@
-from apify_client import ApifyClient
 import os
-import sys
-from pathlib import Path
-from dotenv import load_dotenv
-import json
 import logging
 from typing import Dict, Any, Optional, List
 
 from app.services.business.competitive_analysis.linkedin.linkedin_scraper_base import LinkedInScraperBase
 from app.services.storage.minio_service import MinioService
-
-# Intentar cargar variables de entorno desde diferentes ubicaciones
-# Primero intentamos desde el directorio actual
-load_dotenv()
-
-# Si no se cargó, intentamos desde el directorio raíz del proyecto
-root_dir = Path(__file__).resolve().parents[4]  # Subir 4 niveles para llegar a la raíz del proyecto
-env_path = root_dir / '.env'
-if env_path.exists():
-    load_dotenv(dotenv_path=env_path)
-
-# Verificar que el token está disponible
-apify_token = os.getenv("APIFY_API_KEY")
-if not apify_token:
-    print("Error: No se encontró la variable de entorno APIFY_API_TOKEN")
-    print(f"Asegúrate de que el archivo .env existe y contiene la variable APIFY_API_TOKEN")
-    print(f"Ubicación actual: {os.getcwd()}")
-    print(f"Ubicación de la raíz del proyecto (intentada): {root_dir}")
-    sys.exit(1)
-
-# Initialize the ApifyClient with your API token
-client = ApifyClient(apify_token)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -39,14 +12,97 @@ logger = logging.getLogger(__name__)
 class LinkedInPostScraperService(LinkedInScraperBase):
     """
     Service to scrape LinkedIn posts using Apify's LinkedIn Post Search Scraper
-    Actor ID: curious_coder/linkedin-post-search-scraper
+    Actor ID: kfiWbq3boy3dWKbiL (LinkedIn company search scraper)
     """
     
-    def __init__(self):
-        super().__init__()
-        self.actor_id = "curious_coder/linkedin-post-search-scraper"
+    def __init__(self, apify_api_token: Optional[str] = None, max_retries: int = 2, timeout_secs: int = 300):
+        super().__init__(
+            apify_api_token=apify_api_token,
+            max_retries=max_retries,
+            timeout_secs=timeout_secs
+        )
+        self.actor_id = "kfiWbq3boy3dWKbiL"  # Actualizado al actor correcto
         
-    async def scrape(self, company_url: str, min_delay: int = 2, max_delay: int = 8, deep_scrape: bool = True, **kwargs) -> Dict[str, Any]:
+    def _get_default_linkedin_cookies(self) -> List[Dict[str, Any]]:
+        """
+        Returns a list of default LinkedIn cookies that pueden ser usadas para autenticación
+        
+        Returns:
+            List[Dict[str, Any]]: Lista de cookies predefinidas para LinkedIn
+        """
+        return [
+            {
+                "domain": ".linkedin.com",
+                "expirationDate": 1746143676.122925,
+                "hostOnly": False,
+                "httpOnly": True,
+                "name": "__cf_bm",
+                "path": "/",
+                "sameSite": "no_restriction",
+                "secure": True,
+                "session": False,
+                "storeId": "0",
+                "value": "Fko_XMjsDHZhlCOygcBWWHVspHSAawzwMhHB_bJYMTk-1746141876-1.0.1.1-vH7resNg4qIMPFjJXMOtUkvyJjnFsYYePbLuF_UVdlpv5UeBxme_POO5V5nAesrEa2_S8UItODVlDQtwFr.3.AsagOLuJiXsFE0iNYLH9l8",
+                "id": 1
+            },
+            {
+                "domain": ".linkedin.com",
+                "expirationDate": 1752884072,
+                "hostOnly": False,
+                "httpOnly": False,
+                "name": "_gcl_au",
+                "path": "/",
+                "sameSite": "unspecified",
+                "secure": False,
+                "session": False,
+                "storeId": "0",
+                "value": "1.1.1322076727.1745108072.837929275.1745374342.1745374341",
+                "id": 2
+            },
+            {
+                "domain": ".linkedin.com",
+                "hostOnly": False,
+                "httpOnly": False,
+                "name": "lang",
+                "path": "/",
+                "sameSite": "no_restriction",
+                "secure": True,
+                "session": True,
+                "storeId": "0",
+                "value": "v=2&lang=en-us",
+                "id": 13
+            },
+            {
+                "domain": ".www.linkedin.com",
+                "expirationDate": 1777677876.122627,
+                "hostOnly": False,
+                "httpOnly": True,
+                "name": "li_at",
+                "path": "/",
+                "sameSite": "no_restriction",
+                "secure": True,
+                "session": False,
+                "storeId": "0",
+                "value": "AQEDAS25u-oDk4ExAAABllCM8eMAAAGWsjcTLE0AB4K8QrFlnTTQ_ftu3TfNvu78r_F7SeuxnBg795gjzXS6cLR8fwKZv0tRML1m_O119SwrerFoIMlvNv1wOxl8FQXi7KWMFrqlCUucDdltQSr9kHQB",
+                "id": 26
+            },
+            {
+                "domain": ".www.linkedin.com",
+                "expirationDate": 1777677876.122738,
+                "hostOnly": False,
+                "httpOnly": False,
+                "name": "JSESSIONID",
+                "path": "/",
+                "sameSite": "no_restriction",
+                "secure": True,
+                "session": False,
+                "storeId": "0",
+                "value": "\"ajax:4802930318244996953\"",
+                "id": 25
+            },
+        ]
+        
+    async def scrape(self, company_url: str, min_delay: int = 2, max_delay: int = 8, deep_scrape: bool = True, limit_per_source: int = 10, timeout_secs: Optional[int] = None, **kwargs) -> Dict[str, Any]:
         """
         Scrape LinkedIn posts for a specific company
         
@@ -55,15 +111,19 @@ class LinkedInPostScraperService(LinkedInScraperBase):
             min_delay: Minimum delay between requests (seconds)
             max_delay: Maximum delay between requests (seconds)
             deep_scrape: Whether to perform a deep scrape
+            limit_per_source: Maximum number of posts to scrape per source
+            timeout_secs: Optional timeout override for this specific call
+            **kwargs: Additional parameters
             
         Returns:
             Dict containing scraped data or error information
         """
         try:
-            # Prepare the Actor input with cookie data if available
+            # Prepare the Actor input with the correct configuration
             run_input = {
                 "urls": [company_url],
                 "deepScrape": deep_scrape,
+                "limitPerSource": limit_per_source,
                 "rawData": False,
                 "minDelay": min_delay,
                 "maxDelay": max_delay,
@@ -76,13 +136,23 @@ class LinkedInPostScraperService(LinkedInScraperBase):
                     "apifyProxyCountry": kwargs.get("proxy_country", "US"),
                 }
             
-            # Add cookies if provided
+            # Add cookies - usar cookies proporcionadas o las predeterminadas
             if kwargs.get("cookies"):
                 run_input["cookie"] = kwargs.get("cookies")
+            else:
+                # Si no se proporcionan cookies, usar las predeterminadas
+                run_input["cookie"] = self._get_default_linkedin_cookies()
+            
+            # Get the timeout value (use parameter or fallback to instance default)
+            timeout = timeout_secs or self.timeout_secs
+            logger.info(f"Using timeout of {timeout} seconds for Apify actor call")
             
             # Run the Actor and wait for it to finish
             logger.info(f"Starting LinkedIn post scrape for: {company_url}")
-            run = self.client.actor(self.actor_id).call(run_input=run_input)
+            run = self.client.actor(self.actor_id).call(
+                run_input=run_input,
+                timeout_secs=timeout
+            )
             
             # Fetch Actor results from the run's dataset
             results = []
@@ -100,14 +170,14 @@ class LinkedInPostScraperService(LinkedInScraperBase):
         except Exception as e:
             return self._handle_error(f"LinkedIn post scrape for {company_url}", e)
     
-    async def save_to_minio(self, data: Dict[str, Any], business_id: str, competitor_id: str, file_name: str = "post.json") -> Dict[str, Any]:
+    async def save_to_minio(self, data: Dict[str, Any], business_id: str, competitor_name: str, file_name: str = "post.json") -> Dict[str, Any]:
         """
         Save scraped post data to MinIO
         
         Args:
             data: The scraped post data
             business_id: The business ID
-            competitor_id: The competitor ID
+            competitor_name: The competitor name to use in the path
             file_name: The file name to save (default: post.json)
             
         Returns:
@@ -115,7 +185,7 @@ class LinkedInPostScraperService(LinkedInScraperBase):
         """
         try:
             # Create path for individual competitor data
-            competitor_path = f"{business_id}/competitor-analysis/linkedin/{competitor_id}/{file_name}"
+            competitor_path = f"{business_id}/competitor-analysis/linkedin/{competitor_name}/{file_name}"
             
             # Initialize MinIO service
             minio_service = MinioService(bucket_name="lattice-businesses")
@@ -130,5 +200,5 @@ class LinkedInPostScraperService(LinkedInScraperBase):
             }
             
         except Exception as e:
-            return self._handle_error(f"saving LinkedIn post data to MinIO for {competitor_id}", e)
+            return self._handle_error(f"saving LinkedIn post data to MinIO for {competitor_name}", e)
 

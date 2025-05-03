@@ -50,28 +50,31 @@ services:
     restart: always
     command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
     
-  certbot:
-    image: certbot/certbot
-    volumes:
-      - ./certbot/conf:/etc/letsencrypt
-      - ./certbot/www:/var/www/certbot
-    environment:
-      - EMAIL=admin@infinitylabscol.com
-      - DOMAIN=noit.com.co
-      - DOMAIN_WWW=www.noit.com.co
-    entrypoint: "/bin/sh -c '\
-      if [ ! -d /etc/letsencrypt/live/$$DOMAIN ]; then \
-        certbot certonly --webroot --webroot-path=/var/www/certbot \
-          --email $$EMAIL --agree-tos --no-eff-email \
-          -d $$DOMAIN -d $$DOMAIN_WWW || exit 1; \
-      fi; \
-      trap exit TERM; \
-      while :; do \
-        certbot renew; \
-        sleep 12h & wait $${!}; \
-      done;'"
+  # Comentado para desarrollo local para evitar errores de certificados
+  # Descomentar para producción
+  # certbot:
+  #   image: certbot/certbot
+  #   volumes:
+  #     - ./certbot/conf:/etc/letsencrypt
+  #     - ./certbot/www:/var/www/certbot
+  #   environment:
+  #     - EMAIL=admin@infinitylabscol.com
+  #     - DOMAIN=noit.com.co
+  #     - DOMAIN_WWW=www.noit.com.co
+  #   entrypoint: "/bin/sh -c '\
+  #     if [ ! -d /etc/letsencrypt/live/$$DOMAIN ]; then \
+  #       certbot certonly --webroot --webroot-path=/var/www/certbot \
+  #         --email $$EMAIL --agree-tos --no-eff-email \
+  #         -d $$DOMAIN -d $$DOMAIN_WWW || exit 1; \
+  #     fi; \
+  #     trap exit TERM; \
+  #     while :; do \
+  #       certbot renew; \
+  #       sleep 12h & wait $${!}; \
+  #     done;'"
 
 volumes:
   postgres_data:
   redis_data:
-  certbot_data:
+  # Comentado para desarrollo local
+  # certbot_data:

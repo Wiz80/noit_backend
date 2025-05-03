@@ -23,6 +23,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - TARGETPLATFORM=linux/amd64
+        - BUILDPLATFORM=linux/amd64
     volumes:
       - .:/app
     env_file:

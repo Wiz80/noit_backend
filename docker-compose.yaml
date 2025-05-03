@@ -53,7 +53,7 @@ services:
       - ./certbot/conf:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
     environment:
-      - EMAIL=your-email@example.com
+      - EMAIL=admin@infinitylabscol.com
       - DOMAIN=noit.com.co
       - DOMAIN_WWW=www.noit.com.co
     entrypoint: "/bin/sh -c '\

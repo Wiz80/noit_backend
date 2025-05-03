@@ -1,5 +1,10 @@
-FROM python:3.12
+FROM --platform=$TARGETPLATFORM python:3.12-slim
 WORKDIR /app
+
+# Set build arguments for architecture-specific optimization
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+RUN echo "Building on $BUILDPLATFORM for $TARGETPLATFORM"
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libblas-dev \
     liblapack-dev \
     gfortran \
+    git \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -25,7 +31,7 @@ COPY poetry.lock* ./
 # Configure poetry to not use virtualenvs inside Docker
 RUN poetry config virtualenvs.create false
 
-# Install dependencies
+# Install dependencies with architecture-specific optimizations
 RUN poetry install --without dev --no-interaction --no-ansi --no-root
 
 # Install Spanish model

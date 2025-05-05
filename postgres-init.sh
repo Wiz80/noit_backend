@@ -1,16 +1,17 @@
 #!/bin/bash
+set -e
 
-# Este script prepara el directorio de datos de PostgreSQL
-if [ -d /var/lib/postgresql/data ] && [ "$(ls -A /var/lib/postgresql/data)" ]; then
-  echo "El directorio de datos ya existe, estableciendo permisos correctos"
-  chmod -R 700 /var/lib/postgresql/data
-  chown -R postgres:postgres /var/lib/postgresql/data
-else
-  echo "Creando directorio de datos vacío"
-  mkdir -p /var/lib/postgresql/data
-  chmod 700 /var/lib/postgresql/data
-  chown postgres:postgres /var/lib/postgresql/data
-fi
+# Script de inicialización para PostgreSQL
+echo "Inicializando base de datos PostgreSQL..."
 
-# Iniciar PostgreSQL
-exec docker-entrypoint.sh postgres 
+# La imagen de PostgreSQL ejecuta automáticamente scripts en /docker-entrypoint-initdb.d
+# Este script se ejecuta después de que la base de datos se ha creado pero antes 
+# de que se acepten conexiones externas
+
+# Si necesitamos crear esquemas o tablas adicionales, lo hacemos aquí
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+  CREATE SCHEMA IF NOT EXISTS public;
+  COMMENT ON SCHEMA public IS 'Standard public schema';
+EOSQL
+
+echo "PostgreSQL initialization completed" 

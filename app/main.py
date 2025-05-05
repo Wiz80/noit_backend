@@ -28,7 +28,8 @@ app.add_middleware(
         "http://186.29.213.230",
         "https://186.29.213.230",
         "http://186.84.88.139",
-        "https://186.84.88.139"
+        "https://186.84.88.139",
+        "null"
     ],  
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],

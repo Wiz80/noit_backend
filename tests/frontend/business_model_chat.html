@@ -416,7 +416,7 @@
                     headers: {
                         'Authorization': `Bearer ${state.token}`
                     },
-                    credentials: 'include'
+                    credentials: 'same-origin'
                 });
 
                 debug(`Response status: ${response.status} ${response.statusText}`);
@@ -454,7 +454,7 @@
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${state.token}`
                     },
-                    credentials: 'include',
+                    credentials: 'same-origin',
                     body: JSON.stringify(payload)
                 });
                 
@@ -490,7 +490,7 @@
                     headers: {
                         'Authorization': `Bearer ${state.token}`
                     },
-                    credentials: 'include'
+                    credentials: 'same-origin'
                 });
 
                 if (!response.ok) {
@@ -514,7 +514,7 @@
                     headers: {
                         'Authorization': `Bearer ${state.token}`
                     },
-                    credentials: 'include'
+                    credentials: 'same-origin'
                 });
 
                 if (!response.ok) {

@@ -60,7 +60,8 @@ async def generate_statistics(
             raise HTTPException(status_code=404, detail=f"Instagram user {request.username} not found. You may need to scrape this profile first.")
         
         # Initialize the Instagram statistics analyzer
-        output_folder = f"{business_id}/competitor-analysis/instagram"
+        base_folder = f"{business_id}/competitor-analysis/instagram"
+        output_folder = f"{base_folder}/{request.username}"
         statistics = InstagramStatistics(
             username=request.username,
             post_limit=request.post_limit,
@@ -70,7 +71,7 @@ async def generate_statistics(
         
         # Get posts data from MinIO
         minio_service = MinioService(bucket_name="lattice-businesses")
-        posts_object_name = f"{output_folder}/{request.username}/instagram_posts.json"
+        posts_object_name = f"{base_folder}/{request.username}/instagram_posts.json"
         
         try:
             # Get JSON data from MinIO
@@ -121,7 +122,8 @@ async def generate_statistics(
         stats_file_path = await statistics.generate_statistics()
         
         # Read the generated statistics
-        statistics_data = minio_service.get_object_data(f"{output_folder}/statistics.json")
+        statistics_path = f"{output_folder}/statistics.json"
+        statistics_data = minio_service.get_object_data(statistics_path)
         stats = {}
         
         if statistics_data:
@@ -136,106 +138,51 @@ async def generate_statistics(
             avg_likes_per_post=stats.get('avg_likes_per_post', 0.0),
             avg_comments_per_post=stats.get('avg_comments_per_post', 0.0),
             avg_engagement_rate=stats.get('avg_engagement_rate', 0.0),
-            output_path=f"{output_folder}/statistics.json"
+            output_path=statistics_path
         )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/{business_id}/complete-statistics-analysis")
-async def complete_statistics_analysis(
+@router.get("/{business_id}/statistics/{username}")
+async def get_statistics(
     business_id: UUID,
     username: str,
-    post_limit: int = 50,
-    image_limit: int = 10,
-    background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db)
 ):
     """
-    Run a complete statistics analysis on Instagram posts for a specific username.
-    This endpoint can be run in the background.
+    Get Instagram statistics for a specific username.
     
     Args:
         business_id: UUID of the business idea
-        username: Instagram username to analyze
-        post_limit: Maximum number of posts to analyze
-        image_limit: Maximum number of images to analyze per post
-        background_tasks: Background tasks runner
+        username: Instagram username
         db: Database session
         
     Returns:
-        dict: Analysis initiation status
+        Dict: Statistics data from the generated JSON
     """
     try:
         # Verify if business_id exists
-        business = db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first()
-        if not business:
+        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
             raise HTTPException(status_code=404, detail="Business idea not found")
         
         # Check if username exists in the database
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
         if not instagram_user:
-            raise HTTPException(status_code=404, detail=f"Instagram user {username} not found. You may need to scrape this profile first.")
+            raise HTTPException(status_code=404, detail=f"Instagram user {username} not found.")
         
-        # Define the analysis function to run in the background
-        async def run_statistics_analysis():
-            output_folder = f"{business_id}/competitor-analysis/instagram"
-            
-            try:
-                # Initialize the statistics analyzer
-                statistics = InstagramStatistics(
-                    username=username,
-                    post_limit=post_limit,
-                    image_limit=image_limit,
-                    output_folder=output_folder
-                )
-                
-                # Get posts data from MinIO
-                minio_service = MinioService(bucket_name="lattice-businesses")
-                posts_object_name = f"{output_folder}/{username}/instagram_posts.json"
-                
-                # Get JSON data from MinIO
-                posts_data = minio_service.get_object_data(posts_object_name)
-                if not posts_data:
-                    raise ValueError(f"Could not retrieve posts data from {posts_object_name}")
-                
-                # Copy the data to the expected location
-                await minio_service.upload_content(
-                    object_name=f"{output_folder}/img_posts.json",
-                    data=posts_data,
-                    content_type="application/json"
-                )
-                
-                # Generate statistics
-                stats_file_path = await statistics.generate_statistics()
-                
-                # Update Instagram user record with followers count and other metadata if needed
-                
-                # Update status in database or tracking system
-                # This would typically update a job status table
-                
-            except Exception as e:
-                # Log the error and update status in database
-                print(f"Error in statistics analysis for {username}: {str(e)}")
+        # Get statistics data from MinIO
+        minio_service = MinioService(bucket_name="lattice-businesses")
+        statistics_path = f"{business_id}/competitor-analysis/instagram/{username}/statistics.json"
         
-        # Add analysis to background tasks if available, otherwise run synchronously
-        if background_tasks:
-            background_tasks.add_task(run_statistics_analysis)
-            return {
-                "status": "processing",
-                "message": f"Statistics analysis for {username} started in background",
-                "username": username,
-                "business_id": str(business_id)
-            }
-        else:
-            # Run synchronously
-            await run_statistics_analysis()
-            return {
-                "status": "completed",
-                "message": f"Statistics analysis for {username} completed",
-                "username": username,
-                "business_id": str(business_id)
-            }
+        statistics_data = minio_service.get_object_data(statistics_path)
+        if not statistics_data:
+            raise HTTPException(status_code=404, detail=f"Statistics not found for username {username}")
+        
+        import json
+        stats = json.loads(statistics_data.decode('utf-8'))
+        
+        return stats
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))

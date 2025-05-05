@@ -20,14 +20,30 @@ from app.models.business.competitive_analysis.instagram import InstagramUserInfo
 session = SessionLocal()
 
 class InstagramTopicModeling(BaseInstagramAnalyzer):
-    def __init__(self, username, output_folder, num_topics=5, lang = 'en'):
+    def __init__(self, username, output_folder, num_topics=5, lang='en'):
         super().__init__(username, output_folder)
         self.num_topics = num_topics
         self.lang = lang
-        if lang == "es":
-            self.nlp = spacy.load("es_core_news_sm")
-        else:
-            self.nlp = spacy.load("en_core_web_sm")
+        
+        # Cargar el modelo de lenguaje adecuado según el idioma
+        try:
+            if self.lang == 'es':
+                self.nlp = spacy.load("es_core_news_sm")
+                print(f"✅ Loaded Spanish language model (es_core_news_sm)")
+            else:
+                self.nlp = spacy.load("en_core_web_sm")
+                print(f"✅ Loaded English language model (en_core_web_sm)")
+        except Exception as e:
+            print(f"❌ Error loading language model: {e}")
+            # Intentar cargar un modelo alternativo si falla
+            try:
+                self.nlp = spacy.load("en_core_web_sm")
+                print(f"⚠️ Fallback to English language model")
+            except:
+                # Si todo falla, usar un pipeline simple
+                print(f"⚠️ Using simple pipeline as fallback")
+                self.nlp = spacy.blank("en")
+        
         nltk.download('punkt')
         nltk.download('stopwords')
         self.client = ai.Client()
@@ -47,7 +63,7 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
         """
         try:
             # First check if we already have categorized comments in MinIO
-            categorized_comments_path = f"{self.output_folder}/dynamic_categorized_comments.json"
+            categorized_comments_path = f"{self.output_folder}/{self.username}/dynamic_categorized_comments.json"
             categorized_data = self.minio_service.get_object_data(categorized_comments_path)
             
             if categorized_data:
@@ -77,15 +93,35 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
             
             if raw_comments_data:
                 print(f"📂 Found raw comments in MinIO: {raw_comments_path}")
-                posts_dict = json.loads(raw_comments_data.decode('utf-8'))
+                posts_data = json.loads(raw_comments_data.decode('utf-8'))
                 
                 # Extract comments from raw data
                 comments_list = []
-                for post_id, post_data in posts_dict.items():
-                    for comment in post_data.get("comments", []):
-                        content = comment.get("contenido", "")
-                        if content:
-                            comments_list.append(content)
+                
+                # Check if posts_data is a list (new format) or a dictionary (old format)
+                if isinstance(posts_data, list):
+                    print(f"📊 Processing list format with {len(posts_data)} posts")
+                    # New format: list of posts
+                    for post in posts_data:
+                        if not isinstance(post, dict):
+                            continue
+                        
+                        for comment in post.get("comments", []):
+                            # Try to get content from different possible field names
+                            content = comment.get("text", comment.get("contenido", ""))
+                            if content:
+                                comments_list.append(content)
+                
+                elif isinstance(posts_data, dict):
+                    print(f"📊 Processing dictionary format with {len(posts_data)} posts")
+                    # Old format: dictionary with post_id as keys
+                    for post_id, post_data in posts_data.items():
+                        for comment in post_data.get("comments", []):
+                            content = comment.get("contenido", comment.get("text", ""))
+                            if content:
+                                comments_list.append(content)
+                else:
+                    print(f"⚠️ Unknown format for posts_data: {type(posts_data)}")
                 
                 print(f"📊 Extracted {len(comments_list)} comments from raw data")
                 return comments_list
@@ -96,6 +132,8 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
             
         except Exception as e:
             print(f"❌ Error loading comments: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def clean_text(self, text):
@@ -112,7 +150,18 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
 
     def preprocess_text(self, comments):
         """Preprocesses comments by cleaning, tokenizing, and lemmatizing text."""
-        stop_words = set(stopwords.words('spanish'))
+        # Seleccionar idioma para stopwords
+        try:
+            if self.lang == 'es':
+                stop_words = set(stopwords.words('spanish'))
+                print("🔤 Using Spanish stopwords")
+            else:
+                stop_words = set(stopwords.words('english'))
+                print("🔤 Using English stopwords")
+        except Exception as e:
+            print(f"⚠️ Error loading stopwords: {e}. Using empty set.")
+            stop_words = set()
+        
         processed_comments = []
 
         for comment in comments:
@@ -163,12 +212,12 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
             image_data = img_buffer.getvalue()
 
             await self.minio_service.upload_content(
-                object_name=f"{self.output_folder}/wordcloud.png",
+                object_name=f"{self.output_folder}/{self.username}/wordcloud.png",
                 data=image_data,
                 content_type="image/png"
             )
 
-            print(f"✅ WordCloud saved in MinIO: {self.output_folder}/wordcloud.png")
+            print(f"✅ WordCloud saved in MinIO: {self.output_folder}/{self.username}/wordcloud.png")
         except Exception as e:
             print(f"❌ Error generating WordCloud: {e}")
 
@@ -176,7 +225,7 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
         """Saves the detected topics and statistics as a JSON file in MinIO and in the database."""
         try:
             # Save to MinIO
-            output_path = f"{self.output_folder}/lda_topics.json"
+            output_path = f"{self.output_folder}/{self.username}/lda_topics.json"
             await self.minio_service.upload_content(
                 object_name=output_path,
                 data=json.dumps(topics_dict, indent=4, ensure_ascii=False),
@@ -286,7 +335,7 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
                     final_report = json.loads(final_response)
                     
                     # Save the analysis report to MinIO
-                    analysis_path = f"{self.output_folder}/combined_analysis_report.json"
+                    analysis_path = f"{self.output_folder}/{self.username}/combined_analysis_report.json"
                     await self.minio_service.upload_content(
                         object_name=analysis_path,
                         data=json.dumps(final_report, indent=4, ensure_ascii=False),
@@ -317,7 +366,7 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
                     }
                     
                     # Save the fallback report to MinIO
-                    analysis_path = f"{self.output_folder}/combined_analysis_report.json"
+                    analysis_path = f"{self.output_folder}/{self.username}/combined_analysis_report.json"
                     await self.minio_service.upload_content(
                         object_name=analysis_path,
                         data=json.dumps(fallback_report, indent=4, ensure_ascii=False),

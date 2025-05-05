@@ -47,19 +47,35 @@ class BusinessModelReportResponse(BaseModel):
     report_markdown: str = Field(..., description="Report in markdown format")
     answers: Dict[str, Dict[str, str]] = Field(..., description="Answers organized by phase and question")
     
-class BusinessModelResponse(BaseModel):
+class BusinessModelBase(BaseModel):
+    """
+    Base model for business model data
+    """
+    problem_definition: Optional[str] = Field(None, description="Problem definition")
+    industry: Optional[str] = Field(None, description="Industry")
+    customer_persona: Optional[str] = Field(None, description="Customer persona")
+    value_proposition: Optional[str] = Field(None, description="Value proposition")
+    competitive_advantage: Optional[str] = Field(None, description="Competitive advantage")
+    products_services: Optional[str] = Field(None, description="Products and services offered")
+    challenges_opportunities: Optional[str] = Field(None, description="Challenges and opportunities")
+
+class BusinessModelCreate(BusinessModelBase):
+    """
+    Create model for business model
+    """
+    business_id: str = Field(..., description="Business ID")
+
+class BusinessModelUpdate(BusinessModelBase):
+    """
+    Update model for business model
+    """
+    pass
+
+class BusinessModelResponse(BusinessModelBase):
     """
     Response with business model data
     """
     id: str = Field(..., description="Model ID")
     business_id: str = Field(..., description="Business ID")
-    problem_definition: Optional[str] = Field(None, description="Problem definition")
-    industry: Optional[str] = Field(None, description="Industry")
-    competitors: Optional[str] = Field(None, description="Competitors")
-    customer_persona: Optional[str] = Field(None, description="Customer persona")
-    value_proposition: Optional[str] = Field(None, description="Value proposition")
-    competitive_advantage: Optional[str] = Field(None, description="Competitive advantage")
-    key_metrics: Optional[str] = Field(None, description="Key metrics")
-    key_resources: Optional[str] = Field(None, description="Key resources")
     created_at: datetime = Field(..., description="Creation timestamp")
     updated_at: datetime = Field(..., description="Last update timestamp") 

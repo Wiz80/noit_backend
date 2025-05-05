@@ -1,6 +1,6 @@
 import asyncio
 import json
-from app.services.business.competitive_analysis.linkedin.linkedin_ads_service import LinkedInAdsService
+from app.services.business.competitive_analysis.linkedin.linkedin_ads_scraper_service import LinkedInAdsService
 
 async def test_linkedin_ads_service():
     """

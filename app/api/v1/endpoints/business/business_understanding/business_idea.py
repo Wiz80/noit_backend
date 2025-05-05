@@ -21,7 +21,7 @@ async def create_business_idea(
     current_user: User = Depends(deps.get_current_user)
 ):
     """
-    Crea una nueva idea de negocio con título y descripción.
+    Crea una nueva idea de negocio con título, descripción y URL del sitio web.
     
     Este es el primer paso del flujo. Después de crear la idea de negocio,
     el usuario debe iniciar un chat con el ID obtenido para comenzar el proceso de brief.
@@ -38,8 +38,7 @@ async def create_business_idea(
             detail="You already have a business idea with this title"
         )
     try:
-        # Crear el registro en la base de datos con título y descripción
-        # Los demás campos se llenarán a través del brief
+        # Crear el registro en la base de datos con título, descripción y website_url
         business_idea = crud_business_idea.create_with_owner(
             db=db,   
             obj_in=business_idea_in,

@@ -17,10 +17,20 @@ app = FastAPI(
 # Configurar CORS para permitir solicitudes desde el frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permitir todas las origenes en desarrollo
+    allow_origins=[
+        "https://noit.com.co",
+        "https://www.noit.com.co",
+        "http://localhost:3000",
+        "http://localhost:8080",
+        "http://localhost", 
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8080",
+        "http://186.29.213.230",
+        "https://186.29.213.230"
+    ],  
     allow_credentials=True,
-    allow_methods=["*"],  # Permitir todos los métodos
-    allow_headers=["*"],  # Permitir todos los headers
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 # Add request logging middleware
@@ -34,6 +44,7 @@ async def log_requests(request: Request, call_next):
     
     # Try to log headers and body if needed
     logger.info(f"REQUEST HEADERS: {request.headers.get('content-type', 'none')}")
+    logger.info(f"REQUEST ORIGIN: {request.headers.get('origin', 'none')}")
     
     # Continue processing the request
     response = await call_next(request)
@@ -65,4 +76,4 @@ async def startup_event():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000) 

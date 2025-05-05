@@ -150,7 +150,7 @@ class InstagramImageAnalyzer:
                     post = db.query(InstagramPostInfo).filter(
                         InstagramPostInfo.instagram_user_id == user_info.id,
                         # if the file name has _ in name is a carousel
-                        InstagramPostInfo.post_id == file_name.split("_")[0] if "_" in file_name else file_name.split(".")[0]
+                        InstagramPostInfo.id_post == file_name.split("_")[0] if "_" in file_name else file_name.split(".")[0]
                     ).first()
                     
                     if not post:
@@ -195,7 +195,7 @@ class InstagramImageAnalyzer:
                     # Find the post in the database
                     post = db.query(InstagramPostInfo).filter(
                         InstagramPostInfo.instagram_user_id == user_info.id,
-                        InstagramPostInfo.post_id == post_id
+                        InstagramPostInfo.id_post == post_id
                     ).first()
                     
                     if not post:

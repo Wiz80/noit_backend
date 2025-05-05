@@ -372,7 +372,7 @@ El JSON debe tener formato de diccionario con claves para las categorías y valo
             }
 
             # Upload results to MinIO
-            output_path = f"{self.output_folder}/dynamic_categorized_comments.json"
+            output_path = f"{self.output_folder}/{self.username}/dynamic_categorized_comments.json"
             await self.minio_service.upload_content(
                 object_name=output_path,
                 data=json.dumps(results, indent=4, ensure_ascii=False),
@@ -511,35 +511,39 @@ El JSON debe tener formato de diccionario con claves para las categorías y valo
                 print(f"❌ No comment data found at {object_path}")
                 return []
                 
-            # Parse the JSON into a dictionary
-            posts_dict = json.loads(comments_json)
+            # Parse the JSON into a list (not dictionary)
+            posts_list = json.loads(comments_json)
             
             # Debug log para ver la estructura exacta
-            print(f"🔍 Estructura de posts_dict: {type(posts_dict)}")
-            if len(posts_dict) > 0:
-                first_key = next(iter(posts_dict))
-                print(f"🔍 Ejemplo de post {first_key}:")
-                post_data = posts_dict[first_key]
+            print(f"🔍 Estructura de posts_list: {type(posts_list)}")
+            if isinstance(posts_list, list) and len(posts_list) > 0:
+                print(f"🔍 Ejemplo del primer post:")
+                first_post = posts_list[0]  # Acceder al primer elemento de la lista
                 
                 # Ver las claves del primer post
-                print(f"🔍 Claves del post: {list(post_data.keys())}")
-                
-                # Ver un comentario de ejemplo si existe
-                if "comments" in post_data and len(post_data["comments"]) > 0:
-                    sample_comment = post_data["comments"][0]
-                    print(f"🔍 Claves del comentario: {list(sample_comment.keys())}")
-                    print(f"🔍 Muestra de comentario: {sample_comment}")
+                if isinstance(first_post, dict):
+                    print(f"🔍 Claves del post: {list(first_post.keys())}")
+                    
+                    # Ver un comentario de ejemplo si existe
+                    if "comments" in first_post and len(first_post["comments"]) > 0:
+                        sample_comment = first_post["comments"][0]
+                        print(f"🔍 Claves del comentario: {list(sample_comment.keys())}")
+                        print(f"🔍 Muestra de comentario: {sample_comment}")
             
             # Create a list of formatted comments
             comments_list = []
             
             # Flatten the comments structure to a list
-            for post_id, post_data in posts_dict.items():
-                for comment in post_data.get("comments", []):
+            for post in posts_list:
+                if not isinstance(post, dict):
+                    continue
+                    
+                post_id = post.get("postId", "")
+                for comment in post.get("comments", []):
                     # Extraer los campos correctos basados en la estructura observada
-                    comment_id = comment.get("id_comentario", "")
-                    content = comment.get("contenido", "")
-                    owner = comment.get("ownerusername", "")
+                    comment_id = comment.get("id", "")
+                    content = comment.get("text", "")
+                    owner = comment.get("ownerUsername", "")
                     
                     # Solo incluir comentarios con contenido
                     if content:
@@ -551,7 +555,7 @@ El JSON debe tener formato de diccionario con claves para las categorías y valo
                         }
                         comments_list.append(formatted_comment)
             
-            print(f"📊 Loaded {len(comments_list)} comments from {len(posts_dict)} posts")
+            print(f"📊 Loaded {len(comments_list)} comments from {len(posts_list)} posts")
             
             # Mostrar ejemplos
             if comments_list:

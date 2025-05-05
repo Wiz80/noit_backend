@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Test - Noit Backend</title>
+    <style>
+        :root {
+            --primary-color: #4a6cf7;
+            --secondary-color: #f3f4f6;
+            --tertiary-color: #e0e0e0;
+            --success-color: #22c55e;
+            --danger-color: #ef4444;
+            --background-color: #ffffff;
+            --text-color: #333333;
+            --border-radius: 8px;
+            --box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Arial', sans-serif;
+        }
+
+        body {
+            background-color: var(--secondary-color);
+            padding: 20px;
+            color: var(--text-color);
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+        }
+
+        h1 {
+            margin-bottom: 20px;
+            color: var(--primary-color);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--tertiary-color);
+            border-radius: var(--border-radius);
+        }
+
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        .response {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: var(--secondary-color);
+            border-radius: var(--border-radius);
+            white-space: pre-wrap;
+            min-height: 100px;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            margin-top: 10px;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .success {
+            background-color: var(--success-color);
+        }
+
+        .error {
+            background-color: var(--danger-color);
+        }
+
+        .warning {
+            background-color: orange;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>API Test - Noit Backend</h1>
+        
+        <div class="form-group">
+            <label for="endpoint">API Endpoint</label>
+            <select id="endpoint">
+                <option value="/">Root Endpoint</option>
+                <option value="/api/v1/openapi.json">OpenAPI Schema</option>
+                <!-- Add more endpoints as needed -->
+            </select>
+        </div>
+        
+        <div class="form-group">
+            <label for="method">HTTP Method</label>
+            <select id="method">
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+            </select>
+        </div>
+        
+        <div class="form-group" id="payload-container" style="display:none;">
+            <label for="payload">Request Payload (JSON)</label>
+            <textarea id="payload" rows="5" style="width:100%; padding:10px;"></textarea>
+        </div>
+        
+        <div class="form-group">
+            <label for="port">Port</label>
+            <select id="port">
+                <option value="80">80 (Nginx)</option>
+                <option value="8000">8000 (Direct to FastAPI)</option>
+            </select>
+        </div>
+        
+        <button id="send-request">Send Request</button>
+        
+        <div class="status">
+            <div class="status-dot" id="status-dot"></div>
+            <span id="status-text">Ready to send request</span>
+        </div>
+        
+        <h2 style="margin-top: 20px;">Response:</h2>
+        <div class="response" id="response">
+            No request sent yet.
+        </div>
+    </div>
+    
+    <script>
+        // Get DOM elements
+        const endpointSelect = document.getElementById('endpoint');
+        const methodSelect = document.getElementById('method');
+        const payloadContainer = document.getElementById('payload-container');
+        const payloadTextarea = document.getElementById('payload');
+        const portSelect = document.getElementById('port');
+        const sendButton = document.getElementById('send-request');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const responseDiv = document.getElementById('response');
+        
+        // Show/hide payload based on method
+        methodSelect.addEventListener('change', function() {
+            if (this.value === 'POST' || this.value === 'PUT') {
+                payloadContainer.style.display = 'block';
+            } else {
+                payloadContainer.style.display = 'none';
+            }
+        });
+        
+        // Send request handler
+        sendButton.addEventListener('click', async function() {
+            // Update status
+            statusDot.className = 'status-dot warning';
+            statusText.textContent = 'Sending request...';
+            
+            // Get selected values
+            const endpoint = endpointSelect.value;
+            const method = methodSelect.value;
+            const port = portSelect.value;
+            
+            // Build URL
+            const baseUrl = `http://localhost:${port}`;
+            const url = `${baseUrl}${endpoint}`;
+            
+            try {
+                // Prepare request options
+                const options = {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                };
+                
+                // Add body for POST/PUT requests
+                if (method === 'POST' || method === 'PUT') {
+                    options.body = payloadTextarea.value;
+                }
+                
+                // Send request
+                const response = await fetch(url, options);
+                const statusCode = response.status;
+                
+                // Parse response
+                let data;
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    data = await response.json();
+                    responseDiv.textContent = JSON.stringify(data, null, 2);
+                } else {
+                    data = await response.text();
+                    responseDiv.textContent = data;
+                }
+                
+                // Update status based on response
+                if (response.ok) {
+                    statusDot.className = 'status-dot success';
+                    statusText.textContent = `Success: ${statusCode}`;
+                } else {
+                    statusDot.className = 'status-dot error';
+                    statusText.textContent = `Error: ${statusCode}`;
+                }
+                
+            } catch (error) {
+                // Handle network errors
+                statusDot.className = 'status-dot error';
+                statusText.textContent = `Network Error: ${error.message}`;
+                responseDiv.textContent = `Failed to connect: ${error.message}`;
+                console.error('API request failed:', error);
+            }
+        });
+    </script>
+</body>
+</html> 

@@ -5,7 +5,7 @@ import pytest
 # pytest-asyncio is required for async tests
 pytestmark = pytest.mark.asyncio
 
-from app.services.business.competitive_analysis.linkedin.linkedin_ads_service import LinkedInAdsService
+from app.services.business.competitive_analysis.linkedin.linkedin_ads_scraper_service import LinkedInAdsService
 
 
 @pytest.mark.skipif(

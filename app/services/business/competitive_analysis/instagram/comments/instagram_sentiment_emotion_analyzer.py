@@ -48,7 +48,7 @@ class InstagramSentimentEmotionAnalyzer(BaseInstagramAnalyzer):
         
         A diferencia del método load_comments, este método:
         1. Busca específicamente el archivo processed_comments_data.json
-        2. Procesa la estructura de datos anidada (dictionary con post_id como claves)
+        2. Procesa la estructura de datos anidada (dictionary con post_id como claves o lista de posts)
         3. Devuelve una lista plana de comentarios con información del post incluida
         
         Returns:
@@ -67,57 +67,117 @@ class InstagramSentimentEmotionAnalyzer(BaseInstagramAnalyzer):
                 logger.warning(f"No se encontraron comentarios procesados en {processed_comments_path}")
                 return []
             
-            # Parsear el JSON (estructura esperada: {post_id: {post_data, comments: []}})
-            posts_dict = json.loads(comments_data.decode('utf-8'))
-            if not isinstance(posts_dict, dict):
-                logger.error(f"Formato de datos de comentarios inválido. Se esperaba un diccionario, se recibió {type(posts_dict)}")
-                return []
+            # Parsear el JSON (puede ser un diccionario {post_id: {...}} o una lista de posts)
+            posts_data = json.loads(comments_data.decode('utf-8'))
             
-            # Aplanar la estructura para tener una lista de comentarios
-            post_count = 0
-            comment_count = 0
-            
-            for post_id, post_data in posts_dict.items():
-                post_count += 1
+            # Determinar si es lista o diccionario y procesar adecuadamente
+            if isinstance(posts_data, list):
+                # Formato nuevo: lista de posts
+                logger.info(f"Datos de comentarios en formato de lista con {len(posts_data)} posts")
+                posts_list = posts_data
                 
-                # Verificar que el post tenga comentarios
-                if not "comments" in post_data or not isinstance(post_data["comments"], list):
-                    continue
+                # Procesar cada post en la lista
+                post_count = len(posts_list)
+                comment_count = 0
                 
-                for comment in post_data.get("comments", []):
-                    # Añadir información del post a cada comentario
-                    comment["post_id"] = post_data.get("post_id", "")
-                    comment["shortCode"] = post_id
-                    comment["postUrl"] = f"https://www.instagram.com/p/{post_id}/"
+                for post in posts_list:
+                    if not isinstance(post, dict):
+                        continue
                     
-                    # Renombrar campos si es necesario para compatibilidad
-                    if "id_comentario" in comment and not "id" in comment:
-                        comment["id"] = comment["id_comentario"]
-                    if "contenido" in comment and not "text" in comment:
-                        comment["text"] = comment["contenido"]
-                    if "ownerusername" in comment and not "ownerUsername" in comment:
-                        comment["ownerUsername"] = comment["ownerusername"]
+                    post_id = post.get("postId", "")
                     
-                    comments_list.append(comment)
-                    comment_count += 1
+                    # Verificar que el post tenga comentarios
+                    if not "comments" in post or not isinstance(post["comments"], list):
+                        continue
                     
-                    # Procesar también las respuestas si existen
-                    for reply in comment.get("replies", []):
-                        if isinstance(reply, dict):
-                            reply["post_id"] = post_data.get("post_id", "")
-                            reply["shortCode"] = post_id
-                            reply["postUrl"] = f"https://www.instagram.com/p/{post_id}/"
-                            
-                            # Renombrar campos para replies también
-                            if "id_comentario" in reply and not "id" in reply:
-                                reply["id"] = reply["id_comentario"]
-                            if "contenido" in reply and not "text" in reply:
-                                reply["text"] = reply["contenido"]
-                            if "ownerusername" in reply and not "ownerUsername" in reply:
-                                reply["ownerUsername"] = reply["ownerusername"]
+                    for comment in post.get("comments", []):
+                        # Añadir información del post a cada comentario
+                        comment["post_id"] = post_id
+                        comment["shortCode"] = post.get("shortCode", post_id)
+                        comment["postUrl"] = post.get("postUrl", f"https://www.instagram.com/p/{post_id}/")
+                        
+                        # Renombrar campos si es necesario para compatibilidad
+                        if "id" in comment and not "id_comentario" in comment:
+                            comment["id_comentario"] = comment["id"]
+                        if "text" in comment and not "contenido" in comment:
+                            comment["contenido"] = comment["text"]
+                        if "ownerUsername" in comment and not "ownerusername" in comment:
+                            comment["ownerusername"] = comment["ownerUsername"]
+                        
+                        comments_list.append(comment)
+                        comment_count += 1
+                        
+                        # Procesar también las respuestas si existen
+                        for reply in comment.get("replies", []):
+                            if isinstance(reply, dict):
+                                reply["post_id"] = post_id
+                                reply["shortCode"] = post.get("shortCode", post_id)
+                                reply["postUrl"] = post.get("postUrl", f"https://www.instagram.com/p/{post_id}/")
                                 
-                            comments_list.append(reply)
-                            comment_count += 1
+                                # Renombrar campos para replies también
+                                if "id" in reply and not "id_comentario" in reply:
+                                    reply["id_comentario"] = reply["id"]
+                                if "text" in reply and not "contenido" in reply:
+                                    reply["contenido"] = reply["text"]
+                                if "ownerUsername" in reply and not "ownerusername" in reply:
+                                    reply["ownerusername"] = reply["ownerUsername"]
+                                    
+                                comments_list.append(reply)
+                                comment_count += 1
+                
+            elif isinstance(posts_data, dict):
+                # Formato anterior: diccionario con post_id como claves
+                logger.info(f"Datos de comentarios en formato de diccionario con {len(posts_data)} posts")
+                posts_dict = posts_data
+                
+                # Aplanar la estructura para tener una lista de comentarios
+                post_count = 0
+                comment_count = 0
+                
+                for post_id, post_data in posts_dict.items():
+                    post_count += 1
+                    
+                    # Verificar que el post tenga comentarios
+                    if not "comments" in post_data or not isinstance(post_data["comments"], list):
+                        continue
+                    
+                    for comment in post_data.get("comments", []):
+                        # Añadir información del post a cada comentario
+                        comment["post_id"] = post_data.get("post_id", "")
+                        comment["shortCode"] = post_id
+                        comment["postUrl"] = f"https://www.instagram.com/p/{post_id}/"
+                        
+                        # Renombrar campos si es necesario para compatibilidad
+                        if "id_comentario" in comment and not "id" in comment:
+                            comment["id"] = comment["id_comentario"]
+                        if "contenido" in comment and not "text" in comment:
+                            comment["text"] = comment["contenido"]
+                        if "ownerusername" in comment and not "ownerUsername" in comment:
+                            comment["ownerUsername"] = comment["ownerusername"]
+                        
+                        comments_list.append(comment)
+                        comment_count += 1
+                        
+                        # Procesar también las respuestas si existen
+                        for reply in comment.get("replies", []):
+                            if isinstance(reply, dict):
+                                reply["post_id"] = post_data.get("post_id", "")
+                                reply["shortCode"] = post_id
+                                reply["postUrl"] = f"https://www.instagram.com/p/{post_id}/"
+                                
+                                # Renombrar campos para replies también
+                                if "id_comentario" in reply and not "id" in reply:
+                                    reply["id"] = reply["id_comentario"]
+                                if "contenido" in reply and not "text" in reply:
+                                    reply["text"] = reply["contenido"]
+                                if "ownerusername" in reply and not "ownerUsername" in reply:
+                                    reply["ownerUsername"] = reply["ownerusername"]
+                                    
+                                comments_list.append(reply)
+                                comment_count += 1
+            else:
+                logger.error(f"Formato de datos de comentarios inválido. No es ni lista ni diccionario: {type(posts_data)}")
+                return []
             
             logger.info(f"Se encontraron {comment_count} comentarios en {post_count} posts")
             print(f"📊 Procesados {comment_count} comentarios de {post_count} posts")
@@ -384,7 +444,7 @@ class InstagramSentimentEmotionAnalyzer(BaseInstagramAnalyzer):
             }
 
             # Subir resultados de sentimiento a MinIO
-            sentiment_path = f"{self.output_folder}/sentiment_analysis.json"
+            sentiment_path = f"{self.output_folder}/{self.username}/sentiment_analysis.json"
             await self.minio_service.upload_content(
                 object_name=sentiment_path,
                 data=json.dumps(sentiment_output, indent=4, ensure_ascii=False),
@@ -393,7 +453,7 @@ class InstagramSentimentEmotionAnalyzer(BaseInstagramAnalyzer):
             print(f"✅ Resultados de sentimiento guardados en MinIO: {sentiment_path}")
 
             # Subir resultados de emociones a MinIO
-            emotion_path = f"{self.output_folder}/emotion_analysis.json"
+            emotion_path = f"{self.output_folder}/{self.username}/emotion_analysis.json"
             await self.minio_service.upload_content(
                 object_name=emotion_path,
                 data=json.dumps(emotion_output, indent=4, ensure_ascii=False),

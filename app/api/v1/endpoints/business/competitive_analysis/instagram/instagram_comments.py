@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Any
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Response
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -17,6 +17,7 @@ from app.services.business.competitive_analysis.instagram.instagram_scraper impo
 from app.services.business.competitive_analysis.instagram.comments.instagram_comment_categorizer import InstagramCommentCategorizer
 from app.services.business.competitive_analysis.instagram.comments.instagram_sentiment_emotion_analyzer import InstagramSentimentEmotionAnalyzer
 from app.services.business.competitive_analysis.instagram.comments.instagram_topic_modeling import InstagramTopicModeling
+from app.services.storage.minio_service import MinioService
 
 router = APIRouter()
 
@@ -64,6 +65,15 @@ class TopicModelingResponse(BaseModel):
     total_topics: int
     lda_topics_file_path: str
     wordcloud_file_path: Optional[str] = None
+
+class CompleteCommentsAnalysisRequest(BaseModel):
+    username: str
+    num_topics: int = 5
+    max_comments: int = 50
+    provider: str = "openai"
+    model: str = "openai:gpt-4o-mini"
+    lang: str = "en"
+    run_in_background: bool = True
 
 # Endpoints
 @router.post("/{business_id}/scrape-comments", response_model=ScrapeCommentsResponse)
@@ -293,12 +303,7 @@ async def model_comment_topics(
 @router.post("/{business_id}/complete-comments-analysis")
 async def complete_comments_analysis(
     business_id: UUID,
-    username: str,
-    num_topics: int = 5,
-    max_comments: int = 50,
-    provider: str = "openai",
-    model: str = "openai:gpt-4o-mini",
-    lang: str = "en",
+    request: CompleteCommentsAnalysisRequest,
     background_tasks: BackgroundTasks = None,
     db: Session = Depends(get_db)
 ):
@@ -308,12 +313,7 @@ async def complete_comments_analysis(
     
     Args:
         business_id: UUID of the business idea
-        username: Instagram username to analyze
-        num_topics: Number of topics for topic modeling
-        max_comments: Maximum number of comments to analyze per post
-        provider: LLM provider name
-        model: LLM model name
-        lang: Language code
+        request: CompleteCommentsAnalysisRequest with all parameters
         background_tasks: Background tasks runner
         db: Database session
         
@@ -321,6 +321,15 @@ async def complete_comments_analysis(
         dict: Analysis initiation status
     """
     try:
+        # Extract parameters from request
+        username = request.username
+        num_topics = request.num_topics
+        max_comments = request.max_comments
+        provider = request.provider
+        model = request.model
+        lang = request.lang
+        run_in_background = request.run_in_background
+        
         # Verify if business_id exists
         business = db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first()
         if not business:
@@ -368,8 +377,8 @@ async def complete_comments_analysis(
                 # Log the error and update status in database
                 print(f"Error in complete analysis for {username}: {str(e)}")
         
-        # Add analysis to background tasks if available, otherwise run synchronously
-        if background_tasks:
+        # Check if we should run in background or synchronously based on the parameter
+        if run_in_background and background_tasks:
             background_tasks.add_task(run_complete_analysis)
             return {
                 "status": "processing",
@@ -387,5 +396,294 @@ async def complete_comments_analysis(
                 "business_id": str(business_id)
             }
 
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Endpoints para obtener los resultados del análisis
+@router.get("/{business_id}/comment-categories/{username}")
+async def get_comment_categories(
+    business_id: UUID,
+    username: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene las categorías de comentarios generadas para un usuario de Instagram específico.
+    
+    Args:
+        business_id: UUID del business idea
+        username: Nombre de usuario de Instagram analizado
+        db: Sesión de base de datos
+        
+    Returns:
+        dict: Categorías de comentarios con estadísticas
+    """
+    try:
+        # Verificar si business_id existe
+        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
+            raise HTTPException(status_code=404, detail="Business idea not found")
+        
+        # Verificar si el usuario existe
+        instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
+        if not instagram_user:
+            raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
+        
+        # Inicializar servicio MinIO
+        minio_service = MinioService(bucket_name="lattice-businesses")
+        
+        # Ruta del archivo
+        file_path = f"{business_id}/competitor-analysis/instagram/{username}/dynamic_categorized_comments.json"
+        
+        # Obtener datos del archivo
+        file_data = minio_service.get_object_data(file_path)
+        if not file_data:
+            raise HTTPException(status_code=404, detail="Comment categories data not found")
+        
+        # Devolver contenido del archivo
+        return Response(
+            content=file_data,
+            media_type="application/json"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{business_id}/sentiment-analysis/{username}")
+async def get_sentiment_analysis(
+    business_id: UUID,
+    username: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene el análisis de sentimiento para un usuario de Instagram específico.
+    
+    Args:
+        business_id: UUID del business idea
+        username: Nombre de usuario de Instagram analizado
+        db: Sesión de base de datos
+        
+    Returns:
+        dict: Análisis de sentimiento de los comentarios
+    """
+    try:
+        # Verificar si business_id existe
+        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
+            raise HTTPException(status_code=404, detail="Business idea not found")
+        
+        # Verificar si el usuario existe
+        instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
+        if not instagram_user:
+            raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
+        
+        # Inicializar servicio MinIO
+        minio_service = MinioService(bucket_name="lattice-businesses")
+        
+        # Ruta del archivo
+        file_path = f"{business_id}/competitor-analysis/instagram/{username}/sentiment_analysis.json"
+        
+        # Obtener datos del archivo
+        file_data = minio_service.get_object_data(file_path)
+        if not file_data:
+            raise HTTPException(status_code=404, detail="Sentiment analysis data not found")
+        
+        # Devolver contenido del archivo
+        return Response(
+            content=file_data,
+            media_type="application/json"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{business_id}/emotion-analysis/{username}")
+async def get_emotion_analysis(
+    business_id: UUID,
+    username: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene el análisis de emociones para un usuario de Instagram específico.
+    
+    Args:
+        business_id: UUID del business idea
+        username: Nombre de usuario de Instagram analizado
+        db: Sesión de base de datos
+        
+    Returns:
+        dict: Análisis de emociones de los comentarios
+    """
+    try:
+        # Verificar si business_id existe
+        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
+            raise HTTPException(status_code=404, detail="Business idea not found")
+        
+        # Verificar si el usuario existe
+        instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
+        if not instagram_user:
+            raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
+        
+        # Inicializar servicio MinIO
+        minio_service = MinioService(bucket_name="lattice-businesses")
+        
+        # Ruta del archivo
+        file_path = f"{business_id}/competitor-analysis/instagram/{username}/emotion_analysis.json"
+        
+        # Obtener datos del archivo
+        file_data = minio_service.get_object_data(file_path)
+        if not file_data:
+            raise HTTPException(status_code=404, detail="Emotion analysis data not found")
+        
+        # Devolver contenido del archivo
+        return Response(
+            content=file_data,
+            media_type="application/json"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{business_id}/topic-analysis/{username}")
+async def get_topic_analysis(
+    business_id: UUID,
+    username: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene el análisis de temas (LDA) para un usuario de Instagram específico.
+    
+    Args:
+        business_id: UUID del business idea
+        username: Nombre de usuario de Instagram analizado
+        db: Sesión de base de datos
+        
+    Returns:
+        dict: Temas identificados en los comentarios
+    """
+    try:
+        # Verificar si business_id existe
+        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
+            raise HTTPException(status_code=404, detail="Business idea not found")
+        
+        # Verificar si el usuario existe
+        instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
+        if not instagram_user:
+            raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
+        
+        # Inicializar servicio MinIO
+        minio_service = MinioService(bucket_name="lattice-businesses")
+        
+        # Ruta del archivo
+        file_path = f"{business_id}/competitor-analysis/instagram/{username}/lda_topics.json"
+        
+        # Obtener datos del archivo
+        file_data = minio_service.get_object_data(file_path)
+        if not file_data:
+            raise HTTPException(status_code=404, detail="Topic analysis data not found")
+        
+        # Devolver contenido del archivo
+        return Response(
+            content=file_data,
+            media_type="application/json"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{business_id}/combined-analysis/{username}")
+async def get_combined_analysis(
+    business_id: UUID,
+    username: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene el análisis combinado de categorías y temas para un usuario de Instagram específico.
+    
+    Args:
+        business_id: UUID del business idea
+        username: Nombre de usuario de Instagram analizado
+        db: Sesión de base de datos
+        
+    Returns:
+        dict: Análisis combinado con insights
+    """
+    try:
+        # Verificar si business_id existe
+        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
+            raise HTTPException(status_code=404, detail="Business idea not found")
+        
+        # Verificar si el usuario existe
+        instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
+        if not instagram_user:
+            raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
+        
+        # Inicializar servicio MinIO
+        minio_service = MinioService(bucket_name="lattice-businesses")
+        
+        # Ruta del archivo
+        file_path = f"{business_id}/competitor-analysis/instagram/{username}/combined_analysis_report.json"
+        
+        # Obtener datos del archivo
+        file_data = minio_service.get_object_data(file_path)
+        if not file_data:
+            raise HTTPException(status_code=404, detail="Combined analysis data not found")
+        
+        # Devolver contenido del archivo
+        return Response(
+            content=file_data,
+            media_type="application/json"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{business_id}/wordcloud/{username}")
+async def get_wordcloud(
+    business_id: UUID,
+    username: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene la imagen de nube de palabras (wordcloud) para un usuario de Instagram específico.
+    
+    Args:
+        business_id: UUID del business idea
+        username: Nombre de usuario de Instagram analizado
+        db: Sesión de base de datos
+        
+    Returns:
+        bytes: Imagen PNG de la nube de palabras
+    """
+    try:
+        # Verificar si business_id existe
+        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
+            raise HTTPException(status_code=404, detail="Business idea not found")
+        
+        # Verificar si el usuario existe
+        instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
+        if not instagram_user:
+            raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
+        
+        # Inicializar servicio MinIO
+        minio_service = MinioService(bucket_name="lattice-businesses")
+        
+        # Ruta del archivo
+        file_path = f"{business_id}/competitor-analysis/instagram/{username}/wordcloud.png"
+        
+        # Obtener datos del archivo
+        file_data = minio_service.get_object_data(file_path)
+        if not file_data:
+            raise HTTPException(status_code=404, detail="Wordcloud image not found")
+        
+        # Devolver la imagen
+        return Response(
+            content=file_data,
+            media_type="image/png"
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) 

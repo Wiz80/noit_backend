@@ -1,100 +1,90 @@
-from typing import List, Optional
-from apify_client import ApifyClient
-from datetime import datetime
-from urllib.parse import urlencode
-import os
-from dotenv import load_dotenv
+"""
+LinkedIn Library Scraper Module
 
-load_dotenv()
+This module provides utility functions for LinkedIn scraping operations,
+including building search URLs and other helper functions.
+"""
+import urllib.parse
+from typing import Optional, Dict, Any
 
-def build_search_url(
-    account_owner: Optional[str] = None,
-    countries: Optional[List[str]] = None,
-    date_option: str = "last-30-days",
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    keyword: Optional[str] = None
-) -> str:
+
+def build_search_url(company_id: str, search_type: str = "ads", **kwargs) -> str:
     """
-    Build the LinkedIn Ad Library search URL with the specified filters.
+    Build a LinkedIn search URL for various search types.
     
     Args:
-        account_owner (str, optional): The company/account owner to search for
-        countries (List[str], optional): List of country codes to filter by
-        date_option (str): One of the DATE_OPTIONS values
-        start_date (str, optional): Start date for custom range (YYYY-MM-DD)
-        end_date (str, optional): End date for custom range (YYYY-MM-DD)
-        keyword (str, optional): Keyword to search for in ads
-        
+        company_id: The LinkedIn company ID or slug
+        search_type: The type of search ('ads', 'posts', etc.)
+        **kwargs: Additional parameters for the search URL
+    
     Returns:
-        str: The complete search URL
+        str: The constructed search URL
     """
-    # Validate date option
-    if date_option not in self.DATE_OPTIONS:
-        raise ValueError(f"Invalid date_option. Must be one of {list(self.DATE_OPTIONS.keys())}")
-        
-    # For custom date range, validate dates
-    if date_option == "custom":
-        if not (start_date and end_date):
-            raise ValueError("start_date and end_date are required for custom date range")
-        try:
-            datetime.strptime(start_date, "%Y-%m-%d")
-            datetime.strptime(end_date, "%Y-%m-%d")
-        except ValueError:
-            raise ValueError("Dates must be in YYYY-MM-DD format")
+    base_url = "https://www.linkedin.com"
     
-    # Build query parameters
-    params = {}
-    
-    if account_owner:
-        params["accountOwner"] = account_owner
+    if search_type == "ads":
+        # Default parameters for ads search
+        params = {
+            "date": kwargs.get("date_option", "last-30-days"),
+            "country": kwargs.get("country", "ALL"),
+        }
         
-    if countries:
-        params["countries"] = ",".join(countries)
+        # Build ads library URL
+        url = f"{base_url}/ads/search?companyId={company_id}"
         
-    params["dateOption"] = date_option
+        # Add additional parameters
+        for key, value in params.items():
+            if value:
+                url += f"&{key}={urllib.parse.quote(str(value))}"
+                
+        return url
     
-    if date_option == "custom":
-        params["startDate"] = start_date
-        params["endDate"] = end_date
+    elif search_type == "posts":
+        # Build posts URL
+        url = f"{base_url}/company/{company_id}/posts/"
+        return url
+    
+    elif search_type == "company":
+        # If company_id is a full URL, return it
+        if company_id.startswith(base_url):
+            return company_id
         
-    if keyword:
-        params["keyword"] = keyword
+        # Otherwise, build company URL
+        url = f"{base_url}/company/{company_id}/"
+        return url
     
-    # Build the final URL
-    url = f"{self.BASE_URL}?{urlencode(params)}"
-    return url
+    # Default to company URL
+    return f"{base_url}/company/{company_id}/"
 
-# Initialize the ApifyClient with your API token
-client = ApifyClient(os.getenv("APIFY_API_KEY"))
 
-# Prepare the Actor input
-run_input = {
-    "proxyConfiguration": {
-        "useApifyProxy": True,
-        "apifyProxyGroups": [],
-    },
-    "limit": 5,
-    "type_search": "search_url",
-    "search_url": "https://www.linkedin.com/ad-library/search?accountOwner=nvidia&countries=BR&dateOption=last-30-days",
-    "accountOwner": None,
-    "word_search": None,
-    "date_range_type": "last-30-days",
-    "date_start": None,
-    "date_end": None,
-    "country": "ALL",
-    "combine_companies_onesearch": False,
-    "companies": ["https://www.linkedin.com/company/nvidia"],
-    "company_word_search": None,
-    "company_date_range_type": "last-30-days",
-    "company_date_start": None,
-    "company_date_end": None,
-    "company_country": "ALL",
-}
-
-# Run the Actor and wait for it to finish
-run = client.actor("31BPULiLZ42ca1mvj").call(run_input=run_input)
-
-# Fetch and print Actor results from the run's dataset (if there are any)
-for item in client.dataset(run["defaultDatasetId"]).iterate_items():
-    print(item)
+def extract_company_id_from_url(linkedin_url: str) -> Optional[str]:
+    """
+    Extract company ID or slug from a LinkedIn URL.
+    
+    Args:
+        linkedin_url: The LinkedIn company URL
+    
+    Returns:
+        Optional[str]: The extracted company ID or None if not found
+    """
+    if not linkedin_url:
+        return None
+    
+    # Clean and parse URL
+    url_parts = linkedin_url.strip().split('/')
+    
+    # Remove empty parts
+    url_parts = [part for part in url_parts if part]
+    
+    # Look for the company part
+    for i, part in enumerate(url_parts):
+        if part == "company" and i < len(url_parts) - 1:
+            # Return the part after "company"
+            return url_parts[i+1].split("?")[0]
+    
+    # If URL ends with a company ID (like linkedin.com/company/123)
+    if "company" in url_parts and len(url_parts) > url_parts.index("company") + 1:
+        return url_parts[url_parts.index("company") + 1]
+    
+    # Could not extract company ID
+    return None 

@@ -73,7 +73,15 @@ async def analyze_competitors(
 
         # Get business model data
         business_model_data = clean_json_encoding(minio_service.download_json(business_model_object_path))
-        business_model_data = business_model_data['MarketResearchModule']
+        
+        # Usar solamente la nueva estructura
+        if 'BusinessModelData' in business_model_data:
+            business_model_data = business_model_data['BusinessModelData']
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid business model structure: missing BusinessModelData field"
+            )
 
         business_idea_text = f"""
         {business_idea.title}:
@@ -84,6 +92,16 @@ async def analyze_competitors(
     
         # Validate business model structure
         try:
+            # Verificar que los campos necesarios existen
+            required_fields = ['customer_persona', 'industry']
+            missing_fields = [field for field in required_fields if field not in business_model_data or not business_model_data[field]]
+            
+            if missing_fields:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Missing required fields in business model: {', '.join(missing_fields)}"
+                )
+                
             business_model = BusinessModel(
                 business_idea = business_idea_text,
                 customer_persona= business_model_data['customer_persona'],

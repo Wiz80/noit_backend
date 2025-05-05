@@ -35,7 +35,8 @@ class BusinessModelChatService:
                 "Describe tu cliente ideal (demografía, comportamientos, necesidades):": "customer_persona",
                 "¿Cuál es tu propuesta de valor única? (¿Por qué deberían elegirte los clientes?)": "value_proposition",
                 "¿Qué te diferencia de los competidores?": "competitive_advantage",
-                "¿Cuáles son los recursos clave necesarios para entregar tu propuesta de valor?": "key_resources"
+                "¿Qué productos o servicios ofrece tu negocio?": "products_services",
+                "¿Qué desafíos u oportunidades clave enfrenta tu negocio actualmente?": "challenges_opportunities"
             }
         }
         
@@ -594,7 +595,7 @@ class BusinessModelChatService:
             
             # Format data for MinIO
             minio_data = {
-                "MarketResearchModule": flat_answers,
+                "BusinessModelData": flat_answers,
                 "session_id": session_id,
                 "created_at": datetime.now().isoformat(),
                 "business_id": business_id
@@ -616,11 +617,6 @@ class BusinessModelChatService:
                     }
                 )
                 logger.info(f"Successfully uploaded business model data to MinIO")
-                
-                # Update the MinIO URL in the database model
-                db_model.minio_url = minio_path
-                db.commit()
-                logger.info(f"Updated minio_url in database record")
             except Exception as minio_error:
                 logger.error(f"Error uploading to MinIO: {str(minio_error)}")
                 # Continue even if MinIO upload fails

@@ -791,21 +791,20 @@ class InstagramScraper:
             # Process and store posts data
             for post_data in posts_data:
                 try:
-                    post_info = session.query(InstagramPostInfo).filter_by(post_id=post_data.get('id')).first()
+                    post_info = session.query(InstagramPostInfo).filter_by(id_post=post_data.get('id')).first()
                     if not post_info:
                         post_info = InstagramPostInfo(
-                            post_id=post_data.get('id', ''),
-                            username=username,
+                            id_post=post_data.get('id', ''),
+                            instagram_user_id=user_info.id,
                             caption=post_data.get('caption', ''),
                             likes_count=post_data.get('likesCount', 0),
                             comments_count=post_data.get('commentsCount', 0),
-                            url=post_data.get('url', ''),
-                            image_urls=json.dumps(post_data.get('images', [])),
-                            timestamp=post_data.get('timestamp'),
-                            location=json.dumps(post_data.get('location', {})),
-                            hashtags=json.dumps(post_data.get('hashtags', [])),
-                            mentions=json.dumps(post_data.get('mentions', [])),
-                            extracted_at=datetime.now(UTC)
+                            url_post=post_data.get('url', ''),
+                            type_post=post_data.get('type', 'post'),
+                            hashtags=post_data.get('hashtags', []),
+                            mentions=post_data.get('mentions', []),
+                            post_timestamp=post_data.get('timestamp'),
+                            is_sponsored=post_data.get('isSponsored', False)
                         )
                         session.add(post_info)
                 except Exception as post_error:

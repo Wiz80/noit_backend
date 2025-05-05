@@ -170,6 +170,17 @@ python manage.py runserver
 - **Description**: Analyzes competitors based on the business model, extracting key questions and performing competitor research
 - **Required Fields**: language, validator_provider, validator_model, search_prompt
 
+#### LinkedIn Ads Competitor Analysis
+- **Endpoint**: `POST /api/v1/competitor-analysis/linkedin/{business_id}`
+- **Description**: Scrapes and analyzes LinkedIn ads for competitors
+- **Parameters**:
+  - `competitors` (optional): List of specific competitor IDs to analyze
+  - `date_range_type` (optional): Time range for ads (options: "last-30-days", "this-month", "this-year", "last-year", "custom", default: "last-30-days")
+  - `date_start` (optional): Start date for custom range (required if date_range_type is "custom")
+  - `date_end` (optional): End date for custom range (required if date_range_type is "custom")
+  - `timeout_secs` (optional): Timeout in seconds for the Apify actor call (default: 600)
+- **Response**: Returns a task ID for tracking progress
+
 #### Instagram Competitor Analysis
 - **Endpoint**: `POST /api/v1/competitor-analysis/instagram/{business_id}`
 - **Description**: Initiates Instagram competitor analysis for all competitors associated with a business idea
@@ -416,183 +427,263 @@ For major changes, please open an issue first to discuss what you would like to 
 
 # Noit Backend
 
-Backend services for the Noit platform.
+A FastAPI backend application for Infinity Lab.
 
-## LinkedIn Ads Scraper
+## Docker Setup
 
-The LinkedIn Ads Scraper is a custom solution for extracting ad data from the LinkedIn Ad Library. It uses ScrapeGraphAI with the SmartScraperGraph component to intelligently extract ad information.
+This project is containerized with Docker and uses Docker Compose for orchestration.
+
+### Prerequisites
+
+- Docker and Docker Compose installed on your system
+- Git (for cloning the repository)
+
+### Configuration
+
+1. Clone the repository:
+   ```bash
+   git clone <repository_url>
+   cd noit_backend
+   ```
+
+2. Set up environment variables (optional):
+   The docker-compose.yaml file includes default environment variables. For production, you should customize these in an `.env` file.
+
+### Build and Run
+
+To build and run the application:
+
+```bash
+docker-compose up --build
+```
+
+This will:
+- Build the FastAPI application container
+- Start PostgreSQL, Redis, and MinIO services
+- Start the Nginx proxy server
+
+To run in detached mode:
+
+```bash
+docker-compose up -d
+```
+
+### Services
+
+The application includes the following services:
+
+- **FastAPI App**: The main backend application (http://localhost:8000)
+- **Nginx**: Proxy server that forwards requests from port 80 to the FastAPI app
+- **PostgreSQL**: Database running on port 5435
+- **Redis**: In-memory cache on port 6379
+- **MinIO**: Object storage compatible with S3 API (http://localhost:9003)
+- **Mage**: Data pipeline tool (http://localhost:6789)
+
+### Testing the API
+
+1. Using the browser:
+   - Open http://localhost:80 to access the API through Nginx
+   - Open http://localhost:8000 to access the API directly
+
+2. Using the test HTML page:
+   - Open `tests/api_test.html` in your browser
+   - Select the endpoint, method, and port
+   - Click "Send Request" to test the API
+
+## Development
+
+### Directory Structure
+
+```
+noit_backend/
+├── app/                    # Main application code
+│   ├── api/                # API endpoints
+│   ├── core/               # Core application modules
+│   ├── crud/               # CRUD operations
+│   ├── db/                 # Database models and connections
+│   ├── models/             # Pydantic models
+│   ├── schemas/            # Schema definitions
+│   ├── services/           # Business logic services
+│   └── main.py             # FastAPI application entry point
+├── nginx/                  # Nginx configuration
+│   └── nginx.conf
+├── tests/                  # Tests
+├── Dockerfile              # Docker configuration for FastAPI app
+└── docker-compose.yaml     # Docker Compose configuration
+```
+
+### Customization
+
+The Nginx configuration (`nginx/nginx.conf`) can be modified to adjust the proxy settings as needed. 
+
+The FastAPI application is configured with CORS to allow all origins (`"*"`) for development purposes. For production, you should restrict this to specific domains.
+
+## Troubleshooting
+
+### CORS Issues
+
+If you encounter CORS issues when testing from a web browser:
+1. Check that the FastAPI CORS middleware is configured correctly in `app/main.py`
+2. Verify that Nginx is properly forwarding CORS headers in `nginx/nginx.conf`
+3. Ensure your test page is making requests to the correct port (80 for Nginx or 8000 for direct access)
+
+### Container Connectivity
+
+If containers cannot communicate with each other:
+1. Check Docker networks: `docker network ls`
+2. Inspect the container network: `docker network inspect noit_backend_default` 
+
+## Configuración con Poetry
+
+Este proyecto utiliza Poetry para la gestión de dependencias y entornos virtuales.
+
+### Requisitos previos
+
+- Python 3.12
+- Poetry
+
+### Instalación de Poetry
+
+```bash
+# En macOS/Linux/WSL:
+curl -sSL https://install.python-poetry.org | python3 -
+
+# En Windows (PowerShell):
+(Invoke-WebRequest -Uri https://install.python-poetry.org -UseBasicParsing).Content | python -
+```
+
+### Configuración del proyecto
+
+1. Clonar el repositorio:
+```bash
+git clone <url-del-repositorio>
+cd noit-backend
+```
+
+2. Instalar dependencias con Poetry:
+```bash
+poetry install
+```
+
+3. Activar el entorno virtual:
+```bash
+poetry shell
+```
+
+4. Descargar modelo de lenguaje para español:
+```bash
+python -m spacy download es_core_news_sm
+```
+
+### Ejecutar la aplicación
+
+```bash
+poetry run uvicorn app.main:app --reload
+```
+
+### Ejecución con Docker
+
+Construir la imagen:
+```bash
+docker build -t noit-backend .
+```
+
+Ejecutar el contenedor:
+```bash
+docker run -p 8000:8000 noit-backend
+```
+
+## Variables de entorno
+
+Crear un archivo `.env` en la raíz del proyecto con las siguientes variables:
+
+```
+DATABASE_URL=postgresql://user:password@localhost:5432/dbname
+SECRET_KEY=your_secret_key
+# Otras variables necesarias para tu aplicación
+```
+
+## LinkedIn Competitive Analysis
+
+### Overview
+
+The LinkedIn Competitive Analysis module provides comprehensive tools for analyzing competitors' LinkedIn presence. The module includes functions for:
+
+1. **Data Collection**: Scraping company profiles, posts, and ads from LinkedIn
+2. **NLP Analysis**: Applying Natural Language Processing to extract insights from text data
+3. **ML-Powered Insights**: Using Machine Learning for topic modeling and content analysis
+4. **Comparative Analysis**: Generating comparisons between multiple competitors
 
 ### Features
 
-- Extract ad data from LinkedIn Ad Library using AI-powered scraping
-- Support for various search filters (company, date range, countries, etc.)
-- Automatic detection of CSS selectors to handle LinkedIn page structure changes
-- Robust error handling with automatic retries
-- Detection of login walls and other potential issues
-- Two-tiered approach: direct Playwright extraction with SmartScraperGraph fallback
-- Extracts comprehensive ad information including:
-  - Ad ID
-  - Advertiser logo
-  - Ad text
-  - Call-to-action (CTAs)
-  - Advertiser name and URL
-  - Ad format
-  - Paid by information
-  - Media URLs (images/videos)
-  - Source URL
+#### Data Collection
+- Company profile data (description, followers, industry, etc.)
+- Post content and engagement metrics
+- LinkedIn ad campaigns and targeting data
 
-### Usage
+#### Insights Generation
+- **Sentiment Analysis**: Analyze sentiment in posts and comments
+- **Keyword Extraction**: Identify key themes and terms 
+- **Topic Modeling**: Discover dominant topics in content
+- **Entity Recognition**: Extract organizations, people, and concepts
+- **Engagement Metrics**: Analyze interaction and audience response
+- **Content Distribution**: Understand content type effectiveness
+- **Ad Strategy**: Analyze advertising focus and targeting
 
-To use the LinkedIn Ads Scraper in your application:
+#### Recommendations
+- Automatically generates actionable recommendations based on analysis
+- Identifies content gaps and opportunities
+- Suggests engagement strategies based on competitor performance
 
-```python
-from app.services.business.competitive_analysis.linkedin.linkedin_ads_service import LinkedInAdsService
+### API Endpoints
 
-# Initialize the service
-ads_service = LinkedInAdsService(
-    llm_provider="openai",
-    llm_model="gpt-3.5-turbo"
-)
+#### Data Collection
+- `POST /api/v1/linkedin/competitor/{business_id}/{competitor_id}` - Scrape data for a specific competitor
+- `POST /api/v1/linkedin/business/{business_id}` - Scrape data for all competitors of a business
+- `GET /api/v1/linkedin/competitor/{business_id}/{competitor_id}/company` - Get company data
+- `GET /api/v1/linkedin/competitor/{business_id}/{competitor_id}/posts` - Get posts data
+- `GET /api/v1/linkedin/competitor/{business_id}/{competitor_id}/ads` - Get ads data
 
-# Extract ads for competitors
-result = await ads_service.extract_competitor_ads_data(
-    business_idea_id="your-business-idea-id",
-    db=db_session,
-    date_option="last-30-days",
-    max_results_per_competitor=50,
-    detect_selectors=True  # Enable automatic CSS selector detection
-)
+#### Data Analysis
+- `POST /api/v1/linkedin/analyze/competitor/{business_id}/{competitor_id}` - Analyze specific competitor
+- `POST /api/v1/linkedin/analyze/business/{business_id}` - Analyze all competitors with comparison
+- `GET /api/v1/linkedin/analyze/competitor/{business_id}/{competitor_id}` - Get existing analysis
+- `GET /api/v1/linkedin/analyze/business/{business_id}` - Get existing business-wide analysis
+
+### Installation
+
+To install the required dependencies for LinkedIn analysis:
+
+```bash
+pip install -r requirements-linkedin-analysis.txt
+python -m spacy download en_core_web_sm
 ```
 
-For direct ad extraction without database integration:
+### Usage Example
 
 ```python
-from app.services.scrape.linkedin_ads_scraper import extract_ads_from_linkedin
-
-# Create search URL for a specific company
-search_url = "https://www.linkedin.com/ad-library/search?accountOwner=Microsoft&dateOption=last-30-days"
-
-# Extract ads data with automatic selector detection
-ads_data = await extract_ads_from_linkedin(
-    search_url=search_url,
-    max_results=50,
-    detect_selectors=True
-)
-
-# Check for warnings or issues
-if "warnings" in ads_data:
-    for warning in ads_data["warnings"]:
-        print(f"Warning: {warning}")
-```
-
-### Advanced Usage
-
-For more control over the scraping process, you can use the `LinkedInAdsScraper` class directly:
-
-```python
-from app.services.scrape.linkedin_ads_scraper import LinkedInAdsScraper
-
-# Create a scraper with custom settings
-scraper = LinkedInAdsScraper(
-    llm_provider="openai",
-    llm_model="gpt-3.5-turbo",
-    headless=True,
-    verbose=True,
-    max_retries=3,
-    retry_delay=5,
-    custom_selectors={
-        "ad_container": ".custom-ad-selector"  # Override default selectors
+# Analyze LinkedIn data for a specific competitor
+response = client.post(
+    f"/api/v1/linkedin/analyze/competitor/{business_id}/{competitor_id}",
+    json={
+        "analysis_types": ["sentiment", "keywords", "topics", "engagement", "content", "ads"],
+        "force_refresh": False
     }
 )
 
-# Detect optimal selectors for current LinkedIn structure
-updated_selectors = await scraper.detect_optimal_selectors(search_url)
-scraper.selectors = updated_selectors
+# Get insights and recommendations
+insights = response.json()["insights"]
+recommendations = insights["recommendations"]
 
-# Extract ads
-ads_data = await scraper.extract_ads_data(search_url, max_results=100)
-```
+# Get business-wide competitive analysis with comparisons
+business_analysis = client.post(
+    f"/api/v1/linkedin/analyze/business/{business_id}",
+    json={
+        "analysis_types": ["sentiment", "keywords", "topics", "engagement", "content", "ads"],
+        "include_comparison": True
+    }
+)
 
-### Testing
-
-A test script is provided to verify the scraper's functionality:
-
-```bash
-python app/services/scrape/examples/test_linkedin_ads_scraper.py
-```
-
-This will detect optimal selectors, extract sample ads from a predefined company, and save the results to the `output` directory.
-
-### Setup
-
-To install the required dependencies:
-
-```bash
-python app/services/scrape/setup_scraper.py
-```
-
-This script will install the necessary packages and set up the environment.
-
-## Requirements
-
-- Python 3.8+
-- OpenAI API key (set as environment variable `OPENAI_API_KEY`)
-- Required packages:
-  - scrapegraphai
-  - playwright
-  - aiohttp
-  - python-dotenv
-  - sqlalchemy
-  - minio
-
-## LinkedIn Ads Analysis
-
-The application provides two services for analyzing LinkedIn ads:
-
-### 1. LinkedInAdsService
-
-Custom implementation that uses a scraper to extract ads data from LinkedIn's Ad Library.
-
-### 2. ApifyLinkedInAdsService
-
-Integration with Apify's LinkedIn Ad scraper actor (ID: 31BPULiLZ42ca1mvj) for more robust ad extraction.
-
-#### Setup
-
-1. Set your Apify API token in the environment:
-   ```
-   APIFY_API_TOKEN=your_apify_token
-   ```
-
-2. Usage example:
-   ```python
-   from app.services.business.competitive_analysis.linkedin.linkedin_ads_service import ApifyLinkedInAdsService
-   
-   # Initialize the service
-   service = ApifyLinkedInAdsService()
-   
-   # Search for ads by URL
-   search_url = service.build_search_url(
-       account_owner="company_name",
-       countries=["US"],
-       date_option="last-30-days",
-       keyword="product"
-   )
-   ads_data = await service.fetch_ads_data(search_url)
-   
-   # Or extract ads for all competitors of a business idea
-   results = await service.extract_competitor_ads_data(
-       business_idea_id="your_business_idea_id",
-       db=db_session,
-       date_option="last-30-days"
-   )
-   ```
-
-#### Parameters
-
-The service supports all parameters provided by the Apify actor, including:
-- `type_search`: "search_url" or "company"
-- `limit`: Maximum number of ads to retrieve
-- `countries`: Filter by country codes
-- `date_option`: Time range for ads (last-30-days, this-month, etc.)
-- `keyword`: Keyword to search for in ads 
+# Access comparison data
+comparison = business_analysis.json()["comparison"]
+``` 

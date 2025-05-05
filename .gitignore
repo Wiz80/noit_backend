@@ -11,3 +11,10 @@ __pycache__
 .cursorrules
 
 *.pdf
+
+.venv
+
+.idea
+
+.vscode
+

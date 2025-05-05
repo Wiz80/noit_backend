@@ -4,13 +4,15 @@ from app.api.v1.endpoints.business.business_understanding import business_idea, 
 from app.api.v1.endpoints.business import chat
 from app.api.v1.endpoints.business.competitive_analysis import (
     business_competitors, 
-    instagram, 
-    social_media, 
-    instagram_comments, 
-    instagram_analyzer, 
-    instagram_statistics,
-    linkedin
+    social_media
 )
+from app.api.v1.endpoints.business.competitive_analysis.instagram import (
+    instagram,
+    instagram_comments,
+    instagram_image_analyzer,
+    instagram_statistics
+)
+from app.api.v1.endpoints.business.competitive_analysis.linkedin import linkedin
 from app.api.v1.endpoints.business.webhooks import research_callback
 from app.api.v1.endpoints.business.business_understanding.business_model import router as business_model_router
 
@@ -37,8 +39,8 @@ api_router.include_router(
     tags=["instagram-comments-analysis"]
 )
 api_router.include_router(
-    instagram_analyzer.router,
-    prefix="/analyze-competitors/instagram-analyzer",
+    instagram_image_analyzer.router,
+    prefix="/analyze-competitors/instagram-image-analyzer",
     tags=["instagram-image-analysis"]
 )
 api_router.include_router(

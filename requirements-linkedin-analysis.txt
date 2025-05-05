@@ -1,0 +1,24 @@
+# Requisitos para el análisis de datos de LinkedIn con NLP y ML
+
+# Bibliotecas de Análisis de Datos
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Procesamiento de Lenguaje Natural (NLP)
+nltk>=3.8.1
+spacy>=3.5.0
+textblob>=0.17.1
+
+# Aprendizaje Automático
+scikit-learn>=1.2.0
+
+# Para manejo de visualizaciones (opcional, si se desea ampliar)
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Instalación de modelos de spaCy
+# Ejecutar después de instalar spaCy:
+# python -m spacy download en_core_web_sm
+
+# Nota: Ejecutar nltk.download('punkt'), nltk.download('vader_lexicon'), nltk.download('stopwords')
+# dentro de la aplicación la primera vez 

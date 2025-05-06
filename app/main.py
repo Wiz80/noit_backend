@@ -23,10 +23,12 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:8080",
         "http://localhost", 
+        "http://localhost:4321",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:8080",
         "http://186.29.213.230",
         "https://186.29.213.230",
+        "http://186.29.213.230:4321",
         "http://186.84.88.139",
         "https://186.84.88.139",
         "null"

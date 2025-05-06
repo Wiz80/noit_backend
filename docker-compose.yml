@@ -3,12 +3,11 @@ services:
   postgres:
     image: postgres:14
     volumes:
-      - /data/postgres:/var/lib/postgresql/data
+      - /data/postgres/pgdata:/var/lib/postgresql/data
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=business_ai
-      - PGDATA=/var/lib/postgresql/data/pgdata
     ports:
       - "5435:5432"
     restart: always

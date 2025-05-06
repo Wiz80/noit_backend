@@ -13,7 +13,7 @@ router = APIRouter()
 crud_business_idea = CRUDBusinessIdea(BusinessIdea)
 minio_service = MinioBusinessService()
 
-@router.post("/", response_model=BusinessIdeaInDBBase)
+@router.post("", response_model=BusinessIdeaInDBBase)
 async def create_business_idea(
     *,
     db: Session = Depends(deps.get_db),

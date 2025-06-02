@@ -58,10 +58,56 @@ class CompetitorInfo:
 
 @dataclass
 class BusinessModel:
-    """Structured business model components"""
+    """Structured business model components - matches database schema"""
     business_idea: str
     customer_persona: str
     industry: str
+    problem_definition: Optional[str] = None
+    value_proposition: Optional[str] = None
+    competitive_advantage: Optional[str] = None
+    products_services: Optional[str] = None
+    challenges_opportunities: Optional[str] = None
+    
+    def get_comprehensive_description(self) -> str:
+        """Generate a comprehensive description using all available fields"""
+        sections = []
+        
+        if self.business_idea:
+            sections.append(f"IDEA DE NEGOCIO:\n{self.business_idea}")
+        
+        if self.problem_definition:
+            sections.append(f"PROBLEMA QUE RESUELVE:\n{self.problem_definition}")
+        
+        if self.customer_persona:
+            sections.append(f"CLIENTE OBJETIVO:\n{self.customer_persona}")
+        
+        if self.value_proposition:
+            sections.append(f"PROPUESTA DE VALOR:\n{self.value_proposition}")
+        
+        if self.products_services:
+            sections.append(f"PRODUCTOS/SERVICIOS:\n{self.products_services}")
+        
+        if self.competitive_advantage:
+            sections.append(f"VENTAJA COMPETITIVA:\n{self.competitive_advantage}")
+        
+        if self.challenges_opportunities:
+            sections.append(f"DESAFÍOS Y OPORTUNIDADES:\n{self.challenges_opportunities}")
+        
+        if self.industry:
+            sections.append(f"INDUSTRIA:\n{self.industry}")
+        
+        return "\n\n".join(sections)
+    
+    def get_key_elements_for_research(self) -> Dict[str, str]:
+        """Extract key elements for competitor research"""
+        return {
+            "industry": self.industry or "",
+            "problem": self.problem_definition or "",
+            "value_proposition": self.value_proposition or "",
+            "target_customer": self.customer_persona or "",
+            "products_services": self.products_services or "",
+            "competitive_advantage": self.competitive_advantage or ""
+        }
 
 @dataclass
 class WebhookConfig:
@@ -141,16 +187,12 @@ class EnhancedBusinessAnalyzer:
         if self.lang == 'es':
             self.business_details = f"""
             Detalles del negocio:
-            - Modelo de negocio: {json.dumps(self.business_model.business_idea, indent=2)}
-            - Cliente : {json.dumps(self.business_model.customer_persona, indent=2)}
-            - Industria: {json.dumps(self.business_model.industry, indent=2)}
+            {self.business_model.get_comprehensive_description()}
             """
         else:
             self.business_details = f"""
             Business Details:
-            - Business Model: {json.dumps(self.business_model.business_idea, indent=2)}
-            - Customer Persona: {json.dumps(self.business_model.customer_persona, indent=2)}
-            - Industry: {json.dumps(self.business_model.industry, indent=2)}
+            {self.business_model.get_comprehensive_description()}
             """
             
         self.research_module = self._init_research_module()

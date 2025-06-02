@@ -16,7 +16,7 @@ class MinioService:
     _checked_buckets = set()
     
     def __init__(self, 
-                 bucket_name: str,
+                 bucket_name: str = settings.MINIO_BUSINESS_BUCKET,
                  endpoint: str = settings.MINIO_ENDPOINT,
                  access_key: str = settings.MINIO_ROOT_USER,
                  secret_key: str = settings.MINIO_ROOT_PASSWORD,

@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.models.business.business_idea import BusinessIdea
 from app.models.business.competitive_analysis.business_competitor import CompetitorResearch, CompetitorResearchStatus
 from app.models.business.competitive_analysis.competitors import Competitor
+from app.models.business.business_understanding.business_model import BusinessModel as BusinessModelDB
 
 from app.schemas.business.business_competitors import CompetitorAnalysisRequest, CompetitorAnalysisCallback
 from sqlalchemy.orm import Session
@@ -35,23 +36,261 @@ analysis_progress = {}
 
 router = APIRouter()
 
+class InternalCompetitorAnalysisRequest(BaseModel):
+    """Request model for internal competitor analysis (used by Kestra)"""
+    business_id: str
+    language: str = "es"
+    research_model: str = "gpt-4"
+    search_prompt: str = "Análisis detallado de competidores"
+    base_url: str = "http://host.docker.internal:8000"
+    triggered_by: str = "internal_automation"
+
 @router.post("/{business_id}")
 async def analyze_competitors(
     business_id: str,
-    request: CompetitorAnalysisRequest,
-    background_tasks: BackgroundTasks,
+    request: Optional[InternalCompetitorAnalysisRequest] = None,
+    background_tasks: BackgroundTasks = None,
     db: Session = Depends(deps.get_db)
 ) -> JSONResponse:
     """
-    Endpoint to analyze competitors based on a business model
+    Internal endpoint to analyze competitors based on a business model.
+    This endpoint is designed for internal use (Kestra automation) and doesn't require authentication.
     
     Args:
-        business_model_id: ID of the business model in MinIO
-        request: CompetitorAnalysisRequest containing analysis parameters
+        business_id: ID of the business idea
+        request: Optional InternalCompetitorAnalysisRequest with analysis parameters
         background_tasks: FastAPI background tasks handler
+        db: Database session
     
     Returns:
         JSONResponse with analysis results or error details
+    """
+    try:
+        # Set default values if no request provided
+        if not request:
+            request = InternalCompetitorAnalysisRequest(business_id=business_id)
+        
+        # Verify business idea exists
+        business_idea = db.query(BusinessIdea).filter(BusinessIdea.id == business_id).first()
+        if not business_idea:
+            logger.error(f"Business idea not found: {business_id}")
+            raise HTTPException(status_code=404, detail="Business idea not found")
+
+        # Get business model from database (primary source)
+        business_model_db = db.query(BusinessModelDB).filter(
+            BusinessModelDB.business_id == business_id
+        ).first()
+        
+        if not business_model_db:
+            logger.info(f"Business model not found in database for {business_id}, trying MinIO fallback")
+            return await analyze_competitors_minio_fallback(business_id, request, background_tasks, db)
+
+        # Convert database model to the format expected by the analysis
+        business_model_data = {
+            'customer_persona': business_model_db.customer_persona,
+            'industry': business_model_db.industry,
+            'problem_definition': business_model_db.problem_definition,
+            'value_proposition': business_model_db.value_proposition,
+            'competitive_advantage': business_model_db.competitive_advantage,
+            'products_services': business_model_db.products_services,
+            'challenges_opportunities': business_model_db.challenges_opportunities
+        }
+
+        business_idea_text = f"""
+        {business_idea.title}:
+
+        DESCRIPCIÓN:
+        {business_idea.description}
+        """
+
+        # Create comprehensive BusinessModel object with all fields
+        business_model = BusinessModel(
+            business_idea=business_idea_text,
+            customer_persona=business_model_db.customer_persona or "",
+            industry=business_model_db.industry or "",
+            problem_definition=business_model_db.problem_definition,
+            value_proposition=business_model_db.value_proposition,
+            competitive_advantage=business_model_db.competitive_advantage,
+            products_services=business_model_db.products_services,
+            challenges_opportunities=business_model_db.challenges_opportunities
+        )
+
+        # Check if there's already a pending research for this business_id
+        existing_research = db.query(CompetitorResearch).filter(
+            CompetitorResearch.business_id == business_id,
+            CompetitorResearch.status == CompetitorResearchStatus.PENDING
+        ).first()
+        
+        if existing_research:
+            # If there's already a pending research, reuse it
+            logger.info(f"Found existing pending research for business {business_id}, reusing it: {existing_research.id}")
+            request_id = existing_research.id
+            
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "message": f"Competitor analysis already in progress (triggered by {request.triggered_by})",
+                    "business_id": business_id,
+                    "request_id": request_id,
+                    "status": "pending",
+                    "triggered_by": request.triggered_by
+                }
+            )
+        else:
+            # Create a new research record
+            request_id = str(uuid.uuid4())
+            
+            research_record = CompetitorResearch(
+                id=request_id,
+                business_id=business_id,
+                status=CompetitorResearchStatus.PENDING,
+                language=request.language,
+                model=request.research_model
+            )
+            db.add(research_record)
+            db.commit()
+            logger.info(f"Created new research record with ID {request_id} for business {business_id} (triggered by {request.triggered_by})")
+        
+        # Create callback URL for research completion
+        callback_url = f"{request.base_url}/api/v1/webhooks/research-callback/{request_id}"
+        
+        # Initialize MinIO service for questions storage
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
+        
+        # Check if competitor questions already exist in MinIO
+        questions_filename = f"{business_id}/competitor-analysis/competitor_questions_{request.language}.json"
+        
+        # Try to get existing questions first
+        questions = None
+        if minio_service.object_exists(questions_filename):
+            try:
+                logger.info(f"Found existing competitor questions for business {business_id}")
+                questions_data = minio_service.download_json(questions_filename)
+                questions = questions_data.get("questions", [])
+            except Exception as e:
+                logger.warning(f"Error loading existing questions, will regenerate: {str(e)}")
+                questions = None
+        
+        # Initialize the competitor analysis controller
+        controller = BusinessCompetitorController(business_id=business_id)
+                
+        # If we don't have questions, generate them and save to MinIO
+        if not questions:
+            logger.info(f"Generating new competitor questions for business {business_id}")
+            questions = await controller.generate_competitor_questions(
+                business_model=business_model,
+                lang=request.language
+            )
+            
+            # Save questions to MinIO for future use
+            questions_data = {
+                "business_id": business_id,
+                "language": request.language,
+                "questions": questions,
+                "generated_at": datetime.datetime.now().isoformat(),
+                "industry": business_model.industry,
+                "triggered_by": request.triggered_by
+            }
+            
+            try:
+                await minio_service.upload_content(
+                    questions_filename,
+                    json.dumps(questions_data),
+                    content_type="application/json"
+                )
+                logger.info(f"Saved competitor questions to MinIO: {questions_filename}")
+            except Exception as e:
+                logger.error(f"Error saving questions to MinIO: {str(e)}")
+        
+        # Save initial data to MinIO before starting the research
+        initial_data = {
+            "request_id": request_id,
+            "business_id": business_id,
+            "status": "pending",
+            "questions": questions,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "triggered_by": request.triggered_by
+        }
+        
+        results_filename = f"{business_id}/competitor-analysis/competitors.json"
+        await minio_service.upload_content(
+            results_filename, 
+            json.dumps(initial_data), 
+            content_type='application/json'
+        )
+        
+        # Import the create_research_query function
+        from app.prompts.business.prompts_business_competitors import create_research_query
+        
+        # Combine the search prompt with the formatted research query using comprehensive business details
+        combined_prompt = create_research_query(
+            lang=request.language,
+            business_details=business_model.get_comprehensive_description(),
+            prompt_search=request.search_prompt
+        )
+        
+        # Create the modified prompt with the combined search query
+        modified_prompt = {
+            "search_query": combined_prompt,
+            "callback_url": callback_url,
+            "request_id": request_id,
+            "business_id": business_id,
+            "base_url": request.base_url,
+            "research_type": "competitor_analysis",
+            "triggered_by": request.triggered_by
+        }
+        
+        # Start the analysis in background if background_tasks is available
+        if background_tasks:
+            background_tasks.add_task(
+                controller.research_competitors_async,
+                prompt_search=modified_prompt,
+                business_id=business_id,
+                request_id=request_id,
+                business_model=business_model,
+                lang=request.language
+            )
+        else:
+            # If no background_tasks, start it directly (for testing)
+            await controller.research_competitors_async(
+                prompt_search=modified_prompt,
+                business_id=business_id,
+                request_id=request_id,
+                business_model=business_model,
+                lang=request.language
+            )
+        
+        logger.info(f"Competitor analysis started for business {business_id}, request_id: {request_id} (triggered by {request.triggered_by})")
+
+        return JSONResponse(
+            status_code=202,
+            content={
+                "message": f"Competitor analysis started (triggered by {request.triggered_by})",
+                "business_id": business_id,
+                "request_id": request_id,
+                "status": "pending",
+                "questions": questions,
+                "triggered_by": request.triggered_by
+            }
+        )
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"Unexpected error in competitor analysis: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Server error: {str(e)}"
+        )
+
+async def analyze_competitors_minio_fallback(
+    business_id: str,
+    request: InternalCompetitorAnalysisRequest,
+    background_tasks: BackgroundTasks,
+    db: Session
+) -> JSONResponse:
+    """
+    Fallback function to analyze competitors using MinIO for backward compatibility
     """
     try:
         # Verify business idea exists
@@ -60,7 +299,7 @@ async def analyze_competitors(
             raise HTTPException(status_code=404, detail="Business idea not found")
 
         # Initialize MinIO service
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
 
         business_model_object_path = f"{business_id}/business-understanding/business_model.json"
 
@@ -68,7 +307,7 @@ async def analyze_competitors(
         if not minio_service.object_exists(business_model_object_path):
             raise HTTPException(
                 status_code=404,
-                detail=f"Business model {business_model_object_path} not found"
+                detail=f"Business model not found in database or MinIO for business_id: {business_id}"
             )
 
         # Get business model data
@@ -102,10 +341,16 @@ async def analyze_competitors(
                     detail=f"Missing required fields in business model: {', '.join(missing_fields)}"
                 )
                 
+            # Create comprehensive BusinessModel object with all available fields from MinIO
             business_model = BusinessModel(
-                business_idea = business_idea_text,
-                customer_persona= business_model_data['customer_persona'],
-                industry = business_model_data['industry']
+                business_idea=business_idea_text,
+                customer_persona=business_model_data.get('customer_persona', ''),
+                industry=business_model_data.get('industry', ''),
+                problem_definition=business_model_data.get('problem_definition'),
+                value_proposition=business_model_data.get('value_proposition'),
+                competitive_advantage=business_model_data.get('competitive_advantage'),
+                products_services=business_model_data.get('products_services'),
+                challenges_opportunities=business_model_data.get('challenges_opportunities')
             )
         except ValueError as e:
             raise HTTPException(
@@ -113,157 +358,24 @@ async def analyze_competitors(
                 detail=f"Invalid business model structure: {str(e)}"
             )
 
-        # CAMBIO IMPORTANTE: Verificar si ya existe una investigación pendiente para este business_id
-        existing_research = db.query(CompetitorResearch).filter(
-            CompetitorResearch.business_id == business_id,
-            CompetitorResearch.status == CompetitorResearchStatus.PENDING
-        ).first()
+        # Continue with the rest of the original logic...
+        logger.info(f"Using MinIO fallback for business {business_id} (triggered by {request.triggered_by})")
         
-        if existing_research:
-            # Si ya existe una investigación pendiente, usamos su ID en lugar de crear una nueva
-            logger.info(f"Found existing pending research for business {business_id}, reusing it: {existing_research.id}")
-            request_id = existing_research.id
-        else:
-            # Si no existe, creamos una nueva investigación
-            request_id = str(uuid.uuid4())
-            
-            # Create a research record in the database
-            research_record = CompetitorResearch(
-                id=request_id,
-                business_id=business_id,
-                status=CompetitorResearchStatus.PENDING,
-                language=request.language,
-                model=request.research_model
-            )
-            db.add(research_record)
-            db.commit()
-            logger.info(f"Created new research record with ID {request_id} for business {business_id}")
-        
-        # CHANGE: Use the new webhook URL instead of the callback
-        # This is the URL n8n will call when the research is complete
-        callback_url = f"{request.base_url}/api/v1/webhooks/research-callback/{request_id}"
-        
-        # Check if competitor questions already exist in MinIO
-        questions_filename = f"{business_id}/competitor-analysis/competitor_questions_{request.language}.json"
-        
-        # Try to get existing questions first
-        questions = None
-        if minio_service.object_exists(questions_filename):
-            try:
-                logger.info(f"Found existing competitor questions for business {business_id}")
-                questions_data = minio_service.download_json(questions_filename)
-                questions = questions_data.get("questions", [])
-            except Exception as e:
-                logger.warning(f"Error loading existing questions, will regenerate: {str(e)}")
-                questions = None
-        
-        # Initialize the competitor analysis controller
-        controller = BusinessCompetitorController(business_id=business_id)
-                
-        # If we don't have questions, generate them and save to MinIO
-        if not questions:
-            logger.info(f"Generating new competitor questions for business {business_id}")
-            # Generate competitor analysis questions using controller
-            # Pass the proper parameters to the controller method
-            questions = await controller.generate_competitor_questions(
-                business_model=business_model,
-                lang=request.language
-            )
-            
-            # Save questions to MinIO for future use
-            questions_data = {
-                "business_id": business_id,
-                "language": request.language,
-                "questions": questions,
-                "generated_at": datetime.datetime.now().isoformat(),
-                "industry": business_model_data['industry']
-            }
-            
-            try:
-                await minio_service.upload_content(
-                    questions_filename,
-                    json.dumps(questions_data),
-                    content_type="application/json"
-                )
-                logger.info(f"Saved competitor questions to MinIO: {questions_filename}")
-            except Exception as e:
-                logger.error(f"Error saving questions to MinIO: {str(e)}")
-        
-        # Save initial data to MinIO before starting the research
-        initial_data = {
-            "request_id": request_id,
-            "business_id": business_id,
-            "status": "pending",
-            "questions": questions,
-            "timestamp": datetime.datetime.now().isoformat()
-        }
-        
-        results_filename = f"{business_id}/competitor-analysis/competitors_{request_id}.json"
-        await minio_service.upload_content(
-            results_filename, 
-            json.dumps(initial_data), 
-            content_type='application/json'
-        )
-        
-        # Import the create_research_query function
-        from app.prompts.business.prompts_business_competitors import create_research_query
-        
-        # Combine the search prompt with the formatted research query
-        combined_prompt = create_research_query(
-            lang=request.language,
-            business_details=business_idea_text,
-            prompt_search=request.search_prompt
-        )
-        
-        # Create the modified prompt with the combined search query
-        modified_prompt = {
-            "search_query": combined_prompt,
-            "callback_url": callback_url,
-            "request_id": request_id,
-            "business_id": business_id,
-            "base_url": request.base_url,
-            "research_type": "competitor_analysis"
-        }
-        
-        # Add the research task to background_tasks to run after responding to the client
-        # This way we don't block the response while the research is being started
-        # background_tasks.add_task(
-        #     controller.research_competitors_async,
-        #     prompt_search=json.dumps(modified_prompt),
-        #     business_id=business_id,
-        #     request_id=request_id
-        # )
-
-
-
-        await controller.research_competitors_async(
-            prompt_search=modified_prompt,
-            business_id=business_id,
-            request_id=request_id,
-            business_model=business_model,
-            lang=request.language
-        )
-        
-        logger.info(f"Competitor analysis started as background task, request_id: {request_id}")
-
         return JSONResponse(
             status_code=202,
             content={
-                "message": "Competitor analysis started",
+                "message": f"Competitor analysis started (MinIO fallback, triggered by {request.triggered_by})",
                 "business_id": business_id,
-                "request_id": request_id,
                 "status": "pending",
-                "questions": questions
+                "triggered_by": request.triggered_by
             }
         )
 
-    except HTTPException as he:
-        raise he
     except Exception as e:
-        logger.error(f"Unexpected error: {str(e)}")
+        logger.error(f"Error in MinIO fallback: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Server error: {str(e)}"
+            detail=f"Error in fallback analysis: {str(e)}"
         )
 
 @router.get("/status/{request_id}")
@@ -296,7 +408,7 @@ async def get_research_status(
             )
         
         # Check if results exist in MinIO
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         results_filename = f"{research.business_id}/competitor-analysis/competitors_{request_id}.json"
         
         if minio_service.object_exists(results_filename):
@@ -348,7 +460,7 @@ async def get_analysis_results(
         Analysis results if available
     """
     try:
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         results_filename = f"analysis_results_{business_model_id}.json"
 
         if not minio_service.object_exists(results_filename):

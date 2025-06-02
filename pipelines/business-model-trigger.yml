@@ -1,0 +1,123 @@
+id: business-model-trigger
+namespace: business.understanding
+description: "Trigger competitor analysis when a new business model is created or updated"
+
+tasks:
+  - id: check_new_business_models
+    type: io.kestra.plugin.jdbc.postgresql.Query
+    url: "jdbc:postgresql://postgres:5432/kestra"
+    username: "kestra"
+    password: "k3str4"
+    sql: |
+      SELECT 
+        id as business_model_id,
+        business_id,
+        problem_definition,
+        industry,
+        customer_persona,
+        value_proposition,
+        competitive_advantage,
+        products_services,
+        challenges_opportunities,
+        created_at,
+        updated_at
+      FROM business_models 
+      WHERE (created_at >= NOW() - INTERVAL '2 minutes'
+      OR updated_at >= NOW() - INTERVAL '2 minutes')
+      AND industry IS NOT NULL 
+      AND customer_persona IS NOT NULL
+      ORDER BY updated_at DESC
+    store: true
+
+  - id: process_business_models
+    type: io.kestra.plugin.core.flow.ForEach
+    value: "{{ outputs.check_new_business_models.rows }}"
+    tasks:
+      - id: validate_business_model
+        type: io.kestra.plugin.scripts.python.Script
+        containerImage: python:3.11-alpine
+        beforeCommands:
+          - pip install requests
+        script: |
+          import json
+          import sys
+          import requests
+          
+          # Get the business model data from the current iteration
+          business_model = {{ taskrun.value }}
+          
+          print(f"Processing business model: {json.dumps(business_model, indent=2, default=str)}")
+          
+          # Validate required fields
+          required_fields = ['customer_persona', 'industry', 'business_id']
+          missing_fields = []
+          
+          for field in required_fields:
+              if not business_model.get(field) or business_model.get(field) == '':
+                  missing_fields.append(field)
+          
+          if missing_fields:
+              print(f"Skipping business model due to missing required fields: {missing_fields}")
+              sys.exit(0)  # Skip this iteration, don't fail the entire flow
+          
+          print(f"Business model {business_model['business_id']} is valid for competitor analysis")
+          
+          # Store the business_id for the next task
+          business_id = business_model['business_id']
+          industry = business_model['industry']
+          customer_persona = business_model['customer_persona']
+          
+          print(f"Business ID: {business_id}")
+          print(f"Industry: {industry}")
+          print(f"Customer Persona: {customer_persona}")
+
+      - id: trigger_competitor_analysis
+        type: io.kestra.plugin.core.http.Request
+        uri: "http://host.docker.internal:8000/api/v1/analyze-competitors/{{ taskrun.value.business_id }}"
+        method: "POST"
+        contentType: "application/json"
+        headers:
+          Content-Type: "application/json"
+          User-Agent: "Kestra-Pipeline/1.0"
+        body: |
+          {
+            "business_id": "{{ taskrun.value.business_id }}",
+            "language": "es",
+            "research_model": "gpt-4",
+            "search_prompt": "Análisis detallado de competidores para negocio en la industria de {{ taskrun.value.industry }}",
+            "base_url": "http://host.docker.internal:8000",
+            "triggered_by": "kestra_automation"
+          }
+
+      - id: log_analysis_triggered
+        type: io.kestra.plugin.core.log.Log
+        message: "Competitor analysis triggered for business_id: {{ taskrun.value.business_id }} in industry: {{ taskrun.value.industry }}"
+
+      - id: check_for_errors
+        type: io.kestra.plugin.scripts.python.Script
+        containerImage: python:3.11-alpine
+        script: |
+          import json
+          
+          # Check if the previous HTTP request was successful
+          trigger_response = {{ outputs.trigger_competitor_analysis }}
+          
+          print(f"Response from competitor analysis trigger: {json.dumps(trigger_response, indent=2, default=str)}")
+          
+          if trigger_response.get('code', 200) not in [200, 202]:
+              print(f"Warning: Competitor analysis trigger returned status {trigger_response.get('code')}")
+              print(f"Response body: {trigger_response.get('body', 'No body')}")
+          else:
+              print("Competitor analysis successfully triggered")
+
+triggers:
+  - id: schedule_check
+    type: io.kestra.plugin.core.trigger.Schedule
+    cron: "*/2 * * * *"  # Check every 2 minutes for new/updated business models
+
+  - id: webhook_trigger
+    type: io.kestra.plugin.core.trigger.Webhook
+    key: "business_model_webhook_key"
+    conditions:
+      - type: "io.kestra.plugin.core.condition.ExpressionCondition"
+        expression: "{{ trigger.body.action == 'business_model_created' }}" 

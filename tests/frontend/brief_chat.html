@@ -122,22 +122,54 @@
             border-bottom-left-radius: 4px;
         }
 
-        .message-suggestion {
-            background-color: rgba(74, 108, 247, 0.1);
-            padding: 10px;
-            margin: 10px 0;
+        .message-confirmation {
+            background-color: rgba(34, 197, 94, 0.1);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            color: #15803d;
+        }
+
+        .message-suggestions {
+            margin-top: 12px;
+            padding: 12px;
+            background-color: rgba(74, 108, 247, 0.05);
             border-left: 3px solid var(--primary-color);
-            border-radius: 4px;
+            border-radius: 6px;
+        }
+
+        .suggestion-item {
+            margin-bottom: 10px;
+        }
+
+        .suggestion-item:last-child {
+            margin-bottom: 0;
         }
 
         .suggestion-header {
             font-weight: bold;
-            margin-bottom: 5px;
+            font-size: 0.85em;
             color: var(--primary-color);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .suggestion-content {
             font-style: italic;
+            background-color: white;
+            padding: 8px 10px;
+            border-radius: 4px;
+            border: 1px solid rgba(74, 108, 247, 0.2);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .suggestion-content:hover {
+            background-color: rgba(74, 108, 247, 0.1);
+            border-color: var(--primary-color);
         }
 
         .chat-input {
@@ -283,6 +315,27 @@
             border-radius: var(--border-radius);
             cursor: pointer;
             margin-top: 10px;
+        }
+
+        /* Question formatting for assistant messages */
+        .question-header {
+            background-color: rgba(74, 108, 247, 0.1);
+            padding: 10px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .question-phase {
+            font-weight: bold;
+            color: var(--primary-color);
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+
+        .question-text {
+            font-weight: bold;
+            color: #333;
         }
     </style>
 </head>
@@ -466,7 +519,7 @@
                 }
                 
                 const data = await response.json();
-                debug(`Received response: ${JSON.stringify(data).substring(0, 100)}...`);
+                debug(`Received response: ${JSON.stringify(data).substring(0, 200)}...`);
                 
                 // Guardar session_id si es la primera respuesta
                 if (data.session_id) {
@@ -607,7 +660,7 @@
             // Actualizar estado
             state.selectedBusiness = business.id;
             state.selectedBusinessObject = business;
-            state.sessionId = null; // Reset session ID cuando cambiamos de negocio
+            // DON'T reset session ID here - we'll set it based on existing sessions
             
             // Resetear estado del brief
             state.briefState = {
@@ -634,32 +687,59 @@
                         const inProgressSessions = sessions.filter(s => !s.session_finished);
                         const completedSessions = sessions.filter(s => s.session_finished);
                         
-                        // Mensajes informativos sobre sesiones existentes
-                        let sessionMessage = '';
                         if (inProgressSessions.length > 0) {
-                            const latestSession = inProgressSessions[0];
-                            sessionMessage = `Tienes ${inProgressSessions.length} sesión(es) de brief en progreso. `;
-                            sessionMessage += `La más reciente está en la pregunta ${latestSession.current_question_index} de ${latestSession.total_questions}.`;
-                        }
-                        
-                        if (completedSessions.length > 0) {
-                            sessionMessage += `\n\nTienes ${completedSessions.length} sesión(es) de brief completadas.`;
-                        }
-                        
-                        if (sessionMessage) {
-                            addMessage(sessionMessage + "\n\nEscribe tu primer mensaje para iniciar un nuevo brief.", 'assistant');
+                            // Use the most recent in-progress session
+                            const latestSession = inProgressSessions.sort((a, b) => 
+                                new Date(b.updated_at) - new Date(a.updated_at)
+                            )[0];
+                            
+                            // Set the session ID to continue with existing session
+                            state.sessionId = latestSession.session_id;
+                            
+                            // Update brief state with existing session info
+                            state.briefState = {
+                                currentQuestionIndex: latestSession.current_question_index,
+                                totalQuestions: latestSession.total_questions,
+                                sessionFinished: latestSession.session_finished
+                            };
+                            
+                            // Show brief progress
+                            elements.briefInfo.style.display = 'block';
+                            updateBriefState({
+                                current_question_index: latestSession.current_question_index,
+                                total_questions: latestSession.total_questions,
+                                session_finished: latestSession.session_finished
+                            });
+                            
+                            let sessionMessage = `Continuando con tu sesión de brief en progreso.\n`;
+                            sessionMessage += `Pregunta ${latestSession.current_question_index} de ${latestSession.total_questions}.\n\n`;
+                            sessionMessage += `Escribe un mensaje para continuar donde lo dejaste.`;
+                            
+                            addMessage(sessionMessage, 'assistant');
+                            
+                            debug(`Resuming existing session: ${latestSession.session_id}`);
                         } else {
-                            // Añadir mensaje de bienvenida estándar
-                            addMessage(`¡Bienvenido al brief para "${business.title}"! Escribe tu primer mensaje para comenzar.`, 'assistant');
+                            // No in-progress sessions, reset session ID for new session
+                            state.sessionId = null;
+                            
+                            let sessionMessage = '';
+                            if (completedSessions.length > 0) {
+                                sessionMessage = `Tienes ${completedSessions.length} sesión(es) de brief completadas.\n\n`;
+                            }
+                            sessionMessage += `Escribe tu primer mensaje para iniciar un nuevo brief.`;
+                            
+                            addMessage(`¡Bienvenido al brief para "${business.title}"!\n\n${sessionMessage}`, 'assistant');
                         }
                     } else {
-                        // No hay sesiones existentes
+                        // No hay sesiones existentes, reset session ID
+                        state.sessionId = null;
                         addMessage(`¡Bienvenido al brief para "${business.title}"! Escribe tu primer mensaje para comenzar.`, 'assistant');
                     }
                 })
                 .catch(error => {
                     debug(`Error fetching brief sessions: ${error.message}`, 'error');
-                    // Añadir mensaje de bienvenida estándar en caso de error
+                    // Reset session ID and add standard welcome message
+                    state.sessionId = null;
                     addMessage(`¡Bienvenido al brief para "${business.title}"! Escribe tu primer mensaje para comenzar.`, 'assistant');
                 });
             
@@ -667,107 +747,108 @@
             debug(`Selected business: ${business.id} - ${business.title}`);
         }
 
-        function addMessage(content, role) {
+        function addMessage(content, role, suggestionAnswer = null, suggestionResponse = null, previousConfirmation = null) {
+            const messageContainer = document.createElement('div');
+            messageContainer.className = `message-block`;
+
+            // 1. Display previous_action_confirmation if it exists
+            if (previousConfirmation) {
+                const confirmationEl = document.createElement('div');
+                confirmationEl.className = 'message-confirmation';
+                confirmationEl.innerHTML = `✅ ${previousConfirmation.replace(/\n/g, '<br>')}`;
+                messageContainer.appendChild(confirmationEl);
+            }
+
+            // 2. Display the main message (reply or user message)
             const messageEl = document.createElement('div');
             messageEl.className = `message ${role}`;
             
-            // Formatear las sugerencias para que sean más legibles
-            let formattedContent = content;
-            
             if (role === 'assistant') {
-                // 1. Detectar preguntas del brief (formato: [N] ETAPA X: ...)
-                const questionRegex = /\[(\d+)\]\s+(ETAPA\s+\d+:[^-]+)\s*-\s*([^\n]+)/i;
-                const questionMatch = content.match(questionRegex);
+                let htmlContent = '';
                 
-                // 2. Buscar patrones de sugerencias con una expresión regular más flexible
-                const suggestionRegex = /Sugerencia(?:\s+basada\s+en[^:]*)?:\s*([^\n]+)(?=\n\n|\?|$)/i;
-                const suggestionMatch = content.match(suggestionRegex);
-                
-                if (questionMatch && suggestionMatch) {
-                    // Caso: Pregunta del brief con sugerencia
-                    const questionNum = questionMatch[1];
-                    const etapa = questionMatch[2];
-                    const questionText = questionMatch[3];
-                    const suggestion = suggestionMatch[1].trim();
+                // Check if content contains question format patterns
+                if (content.includes('**') && content.includes('Pregunta')) {
+                    // Extract question information for better formatting
+                    const lines = content.split('\n');
+                    let formattedContent = '';
+                    let insideQuestionBlock = false;
                     
-                    // Dividir el contenido en partes
-                    const parts = content.split(suggestionMatch[0]);
-                    const beforeSuggestion = parts[0].trim();
-                    const afterSuggestion = parts.length > 1 ? parts[1].trim() : '';
-                    
-                    // Crear estructura HTML
-                    messageEl.innerHTML = `
-                        <div class="message-content">
-                            <div><strong>${etapa}</strong></div>
-                            <div style="margin: 8px 0"><strong>[${questionNum}]</strong> ${questionText}</div>
-                        </div>
-                        <div class="message-suggestion">
-                            <div class="suggestion-header">Sugerencia:</div>
-                            <div class="suggestion-content">"${suggestion}"</div>
-                        </div>
-                    `;
-                    
-                    if (afterSuggestion) {
-                        messageEl.innerHTML += `<div class="message-content">${afterSuggestion}</div>`;
+                    for (let line of lines) {
+                        if (line.includes('**ETAPA') && line.includes('**')) {
+                            // Phase header
+                            const phase = line.replace(/\*\*/g, '');
+                            formattedContent += `<div class="question-header"><div class="question-phase">${phase}</div>`;
+                            insideQuestionBlock = true;
+                        } else if (line.includes('**Pregunta') && line.includes('**')) {
+                            // Question text
+                            const questionText = line.replace(/\*\*/g, '');
+                            formattedContent += `<div class="question-text">${questionText}</div></div>`;
+                            insideQuestionBlock = false;
+                        } else if (line.trim()) {
+                            // Regular content
+                            if (insideQuestionBlock) {
+                                formattedContent += `<div class="question-text">${line}</div></div>`;
+                                insideQuestionBlock = false;
+                            } else {
+                                formattedContent += `<div>${line}</div>`;
+                            }
+                        }
                     }
                     
-                } else if (questionMatch) {
-                    // Caso: Solo pregunta del brief
-                    const questionNum = questionMatch[1];
-                    const etapa = questionMatch[2];
-                    const questionText = questionMatch[3];
-                    
-                    messageEl.innerHTML = `
-                        <div class="message-content">
-                            <div><strong>${etapa}</strong></div>
-                            <div style="margin: 8px 0"><strong>[${questionNum}]</strong> ${questionText}</div>
-                            <div>${content.replace(questionRegex, '')}</div>
-                        </div>
-                    `;
-                    
-                } else if (suggestionMatch) {
-                    // Caso: Solo sugerencia
-                    const suggestionText = suggestionMatch[0];
-                    const parts = content.split(suggestionText);
-                    const beforeSuggestion = parts[0].trim();
-                    const afterSuggestion = parts.length > 1 ? parts[1].trim() : '';
-                    const suggestion = suggestionMatch[1].trim();
-                    
-                    let htmlContent = '';
-                    
-                    if (beforeSuggestion) {
-                        htmlContent += `<div class="message-content">${beforeSuggestion}</div>`;
-                    }
-                    
-                    htmlContent += `                        <div class="message-suggestion">
-                            <div class="suggestion-header">Sugerencia:</div>
-                            <div class="suggestion-content">"${suggestion}"</div>
-                        </div>
-                    `;
-                    
-                    if (afterSuggestion) {
-                        htmlContent += `<div class="message-content">${afterSuggestion}</div>`;
-                    }
-                    
-                    messageEl.innerHTML = htmlContent;
+                    htmlContent = `<div class="message-content">${formattedContent}</div>`;
                 } else {
-                    // Mensaje normal
-                    messageEl.innerHTML = `<div class="message-content">${content}</div>`;
+                    // Regular message formatting
+                    htmlContent = `<div class="message-content">${content.replace(/\n/g, '<br>')}</div>`;
                 }
                 
+                // 3. Add suggestions if they exist
+                if (suggestionAnswer || suggestionResponse) {
+                    htmlContent += `<div class="message-suggestions">`;
+                    
+                    if (suggestionAnswer) {
+                        htmlContent += `
+                            <div class="suggestion-item">
+                                <div class="suggestion-header">💡 Cómo responder</div>
+                                <div class="suggestion-content" onclick="fillSuggestion('${suggestionAnswer.replace(/'/g, "\\'")}')">
+                                    ${suggestionAnswer.replace(/\n/g, '<br>')}
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    if (suggestionResponse) {
+                        htmlContent += `
+                            <div class="suggestion-item">
+                                <div class="suggestion-header">🤖 Ejemplo de respuesta</div>
+                                <div class="suggestion-content" onclick="fillSuggestion('${suggestionResponse.replace(/'/g, "\\'")}')">
+                                    ${suggestionResponse.replace(/\n/g, '<br>')}
+                                </div>
+                            </div>
+                        `;
+                    }
+                    
+                    htmlContent += `</div>`;
+                }
+                
+                messageEl.innerHTML = htmlContent;
             } else {
-                // Mensajes del usuario
-                messageEl.innerHTML = `<div class="message-content">${content}</div>`;
+                messageEl.innerHTML = `<div class="message-content">${content.replace(/\n/g, '<br>')}</div>`;
             }
             
-            // Agregar la hora del mensaje
             const timeEl = document.createElement('div');
             timeEl.className = 'message-time';
             timeEl.textContent = getTimeString();
             messageEl.appendChild(timeEl);
-            
-            elements.messages.appendChild(messageEl);
+
+            messageContainer.appendChild(messageEl);
+            elements.messages.appendChild(messageContainer);
             elements.messages.scrollTop = elements.messages.scrollHeight;
+        }
+
+        // Function to fill suggestion into input field
+        function fillSuggestion(text) {
+            elements.messageInput.value = text;
+            elements.messageInput.focus();
         }
 
         // ======= Event Handlers =======
@@ -825,12 +906,18 @@
             
             try {
                 const response = await sendMessage(message);
-                addMessage(response.reply, 'assistant');
                 
-                // Actualizar el estado del brief
+                // Use the new schema fields
+                addMessage(
+                    response.reply, 
+                    'assistant', 
+                    response.suggestion_answer,
+                    response.suggestion_response,
+                    response.previous_action_confirmation
+                );
+                
                 updateBriefState(response);
                 
-                // Si el brief ha finalizado, mostrar mensaje especial
                 if (response.session_finished) {
                     showBriefFinished(response.session_id);
                 }

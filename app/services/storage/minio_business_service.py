@@ -1,11 +1,12 @@
 from app.services.storage.minio_service import MinioService
+from app.core.config import settings
 import io
 from typing import List
 from minio.error import S3Error
 
 class MinioBusinessService(MinioService):
     def __init__(self):
-        super().__init__(bucket_name="lattice-businesses")
+        super().__init__(bucket_name=settings.MINIO_BUSINESS_BUCKET)
     
     async def initialize_business_folders(self, business_id: int) -> bool:
         """

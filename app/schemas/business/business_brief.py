@@ -1,53 +1,66 @@
 from pydantic import BaseModel, Field
-from typing import Dict, List, Optional, Any, Union
-
+from typing import Dict, List, Optional, Any
+from datetime import datetime
 
 class BriefMessageRequest(BaseModel):
-    """
-    Modelo para solicitudes de mensajes del brief
-    """
-    message: str = Field(..., description="Mensaje enviado por el usuario")
-    session_id: Optional[str] = Field(None, description="ID de la sesión de chat. Si no se proporciona, se creará una nueva sesión")
-    business_id: str = Field(..., description="ID del negocio al que pertenece esta sesión")
-
+    """Request model for sending a message in a business brief chat session"""
+    message: str = Field(..., description="Message sent by the user")
+    session_id: Optional[str] = Field(None, description="Session ID for an existing chat session")
+    business_id: str = Field(..., description="ID of the business")
+    llm_model: Optional[str] = Field("claude-3-5-sonnet-20241022", description="LLM model to use for the conversation")
+    llm_temperature: Optional[float] = Field(0.7, description="Temperature for LLM responses (0.0-1.0)")
+    llm_max_tokens: Optional[int] = Field(4000, description="Maximum tokens for LLM responses")
 
 class BriefMessageResponse(BaseModel):
-    """
-    Modelo para respuestas de mensajes del brief
-    """
-    session_id: str = Field(..., description="ID de la sesión de chat")
-    reply: str = Field(..., description="Respuesta del sistema al mensaje del usuario")
-    current_question_index: int = Field(..., description="Índice de la pregunta actual en el brief")
-    total_questions: int = Field(..., description="Número total de preguntas en el brief")
-    session_finished: bool = Field(False, description="Indica si la sesión de brief ha finalizado")
-    
+    """Response model for a message in a business brief chat session"""
+    session_id: str = Field(..., description="Session ID for the chat session")
+    reply: str = Field(..., description="Reply from the system")
+    suggestion_answer: Optional[str] = Field(None, description="Suggested answer for the current question")
+    suggestion_response: Optional[str] = Field(None, description="Suggested response from the agent")
+    current_question_index: int = Field(..., description="Current question index")
+    total_questions: int = Field(..., description="Total number of questions")
+    session_finished: bool = Field(..., description="Whether the session is finished")
+    answer_recorded: Optional[bool] = Field(None, description="Whether the user's answer was recorded")
+    previous_action_confirmation: Optional[str] = Field(None, description="Confirmation message for the previous action")
+    llm_model_used: Optional[str] = Field(None, description="LLM model that was used for this response")
+    response_was_refined: Optional[bool] = Field(None, description="Whether the user's response was automatically refined")
+    refined_answer: Optional[str] = Field(None, description="The refined version of the user's answer if refinement was applied")
+    used_suggestion_as_base: Optional[bool] = Field(None, description="Whether the suggestion was used as the base for the response")
+    was_affirmative_to_suggestion: Optional[bool] = Field(None, description="Whether the user's response was affirmative to the suggestion")
+    etapa1_completed: Optional[bool] = Field(None, description="Whether ETAPA 1 was just completed")
+    business_model_mapping: Optional[Dict[str, str]] = Field(None, description="Business model mapping when ETAPA 1 is completed")
+    mapping_success: Optional[bool] = Field(None, description="Whether the business model mapping was successful")
 
 class BriefSessionInfo(BaseModel):
-    """
-    Modelo para información de la sesión del brief
-    """
-    session_id: str = Field(..., description="ID de la sesión")
-    business_id: str = Field(..., description="ID del negocio")
-    user_id: str = Field(..., description="ID del usuario")
-    current_question_index: int = Field(..., description="Índice de la pregunta actual")
-    total_questions: int = Field(..., description="Total de preguntas en el brief")
-    session_finished: bool = Field(False, description="Indica si la sesión ha finalizado")
-    created_at: str = Field(..., description="Fecha de creación de la sesión")
-    updated_at: str = Field(..., description="Fecha de última actualización de la sesión")
-
+    """Information about a brief session"""
+    session_id: str = Field(..., description="Session ID")
+    business_id: str = Field(..., description="Business ID")
+    user_id: str = Field(..., description="User ID")
+    current_question_index: int = Field(..., description="Current question index")
+    total_questions: int = Field(..., description="Total number of questions")
+    session_finished: bool = Field(..., description="Whether the session is finished")
+    created_at: str = Field(..., description="Session creation timestamp")
+    updated_at: str = Field(..., description="Session last update timestamp")
 
 class BriefSessionListResponse(BaseModel):
-    """
-    Modelo para lista de sesiones de brief
-    """
-    sessions: List[BriefSessionInfo] = Field([], description="Lista de sesiones de brief")
-
+    """Response model for listing brief sessions"""
+    sessions: List[BriefSessionInfo] = Field(..., description="List of brief sessions")
 
 class BriefReportResponse(BaseModel):
-    """
-    Modelo para informe final del brief
-    """
-    session_id: str = Field(..., description="ID de la sesión de chat")
-    business_id: str = Field(..., description="ID del negocio")
-    report_markdown: str = Field(..., description="Informe final del brief en formato Markdown")
-    answers: Dict[str, Dict[str, str]] = Field(..., description="Respuestas organizadas por fase y pregunta") 
+    """Response model for brief report"""
+    session_id: str = Field(..., description="Session ID")
+    business_id: str = Field(..., description="Business ID")
+    report_markdown: str = Field(..., description="Report in markdown format")
+    answers: Dict[str, Dict[str, str]] = Field(..., description="All answers organized by phases")
+
+class LLMConfigResponse(BaseModel):
+    """Response model for LLM configuration information"""
+    available_models: Dict[str, List[str]] = Field(..., description="Available models grouped by provider")
+    current_default: str = Field(..., description="Current default model")
+    supported_providers: List[str] = Field(..., description="List of supported providers")
+
+class LLMChangeRequest(BaseModel):
+    """Request model for changing LLM configuration"""
+    llm_model: str = Field(..., description="New LLM model to use")
+    temperature: Optional[float] = Field(0.7, description="Temperature for LLM responses")
+    max_tokens: Optional[int] = Field(4000, description="Maximum tokens for responses") 

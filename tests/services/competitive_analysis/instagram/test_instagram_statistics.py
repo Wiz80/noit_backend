@@ -122,7 +122,7 @@ async def test_instagram_statistics():
         print(f"🚀 Initializing Instagram Statistics Analysis...")
         
         # Initialize MinioService to check for posts data
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Define object paths - Update to correct path for bulldogskincare
         posts_object_name = f"{output_folder}/{instagram_username}/instagram_posts.json"

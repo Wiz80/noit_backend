@@ -144,7 +144,7 @@ async def process_brief_message(
         }
         
         # Process message with CrewAI brief service
-        result = brief_service.run_agent_turn(request.message, session_data)
+        result = await brief_service.run_agent_turn(request.message, session_data)
         
         # Handle ETAPA 1 completion and business model mapping
         if result.get("etapa1_completed") and result.get("business_model_mapping"):

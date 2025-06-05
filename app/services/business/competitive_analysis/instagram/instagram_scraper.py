@@ -24,6 +24,9 @@ from sqlalchemy import select
 from app.services.business.competitive_analysis.instagram.instagram_image_analyzer import InstagramImageAnalyzer
 import logging
 
+# Import settings
+from app.core.config import settings
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,7 +35,7 @@ session = SessionLocal()
 
 
 class InstagramScraper:
-    def __init__(self, api_key, output_folder="/content/Instagram_Scraper", bucket_name="lattice-businesses"):
+    def __init__(self, api_key, output_folder="/content/Instagram_Scraper", bucket_name=settings.MINIO_BUCKET_NAME):
         """
         Initialize InstagramScraper class.
 

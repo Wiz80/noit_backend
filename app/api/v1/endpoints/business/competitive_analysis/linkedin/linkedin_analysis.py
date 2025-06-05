@@ -194,7 +194,7 @@ async def get_competitor_linkedin_analysis(
         )
     
     # Initialize MinIO service
-    minio_service = MinioService(bucket_name="lattice-businesses")
+    minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
     
     # Define the path for the analysis data
     analysis_path = f"{business_id}/competitor-analysis/linkedin/{competitor.competitor_name.lower()}/analysis.json"
@@ -258,7 +258,7 @@ async def get_business_linkedin_analysis(
         )
     
     # Initialize MinIO service
-    minio_service = MinioService(bucket_name="lattice-businesses")
+    minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
     
     # Define the path for the analysis data
     analysis_path = f"{business_id}/competitor-analysis/linkedin/business_analysis.json"

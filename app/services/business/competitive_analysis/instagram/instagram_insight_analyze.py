@@ -9,7 +9,7 @@ class InstagramInsightAnalyzer:
         self.output_folder = output_folder
         self.api_key = api_key
         self.client = OpenAI(api_key=api_key)
-        self.minio_service = MinioService(bucket_name="lattice-businesses")
+        self.minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
 
     async def load_json_from_minio(self, object_path):
         """Loads a JSON file from MinIO and returns its content as a Python dictionary."""

@@ -1,7 +1,6 @@
 from fastapi import APIRouter
 from app.api.v1.endpoints import auth
 from app.api.v1.endpoints.business.business_understanding import business_idea, business_brief, state_of_art
-from app.api.v1.endpoints.business import chat
 from app.api.v1.endpoints.business.competitive_analysis import (
     business_competitors, 
     social_media
@@ -14,7 +13,6 @@ from app.api.v1.endpoints.business.competitive_analysis.instagram import (
 )
 from app.api.v1.endpoints.business.competitive_analysis.linkedin import linkedin
 from app.api.v1.endpoints.business.webhooks import research_callback
-from app.api.v1.endpoints.business.business_understanding.business_model import router as business_model_router
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["authentication"])
@@ -64,17 +62,6 @@ api_router.include_router(
     prefix="/business-brief",
     tags=["business-brief"]
 )
-api_router.include_router(
-    chat.router,
-    prefix="/chat",
-    tags=["chat"]
-) 
-
-api_router.include_router(
-    business_model_router, 
-    prefix="/business-model", 
-    tags=["business_model"]
-    )
 
 api_router.include_router(
     state_of_art.router,

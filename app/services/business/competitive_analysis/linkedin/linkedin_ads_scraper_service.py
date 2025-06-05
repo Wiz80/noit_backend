@@ -178,7 +178,7 @@ class LinkedInAdsScraperService(LinkedInScraperBase):
             competitor_path = f"{business_id}/competitor-analysis/linkedin/{competitor_name}/{file_name}"
             
             # Initialize MinIO service
-            minio_service = MinioService(bucket_name="lattice-businesses")
+            minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
             
             # Upload data to MinIO
             minio_service.upload_json(competitor_path, data)

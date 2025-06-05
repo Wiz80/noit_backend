@@ -17,6 +17,7 @@ from app.controllers.competitive_analysis.website_extraction_controller import W
 from app.core.config import settings
 
 from app.models.business.business_idea import BusinessIdea
+from app.models.business.business_progress import BusinessProgress, StepStatus
 from app.models.business.competitive_analysis.business_competitor import CompetitorResearch, CompetitorResearchStatus
 from app.models.business.competitive_analysis.competitors import Competitor
 from app.models.business.business_understanding.business_model import BusinessModel as BusinessModelDB
@@ -25,6 +26,9 @@ from app.schemas.business.business_competitors import CompetitorAnalysisRequest,
 from sqlalchemy.orm import Session
 
 from app.utils.decode_json import clean_json_encoding
+
+# Import TaskIQ task
+from app.tasks.competitor_analysis_tasks import research_competitors_task
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -40,7 +44,9 @@ class InternalCompetitorAnalysisRequest(BaseModel):
     """Request model for internal competitor analysis (used by Kestra)"""
     business_id: str
     language: str = "es"
-    research_model: str = "gpt-4"
+    validator_provider: str = "openai"
+    validator_model: str = "openai:gpt-4o-mini"
+    research_model: str = "sonar-deep-research"
     search_prompt: str = "Análisis detallado de competidores"
     base_url: str = "http://host.docker.internal:8000"
     triggered_by: str = "internal_automation"
@@ -49,7 +55,6 @@ class InternalCompetitorAnalysisRequest(BaseModel):
 async def analyze_competitors(
     business_id: str,
     request: Optional[InternalCompetitorAnalysisRequest] = None,
-    background_tasks: BackgroundTasks = None,
     db: Session = Depends(deps.get_db)
 ) -> JSONResponse:
     """
@@ -59,7 +64,6 @@ async def analyze_competitors(
     Args:
         business_id: ID of the business idea
         request: Optional InternalCompetitorAnalysisRequest with analysis parameters
-        background_tasks: FastAPI background tasks handler
         db: Database session
     
     Returns:
@@ -83,18 +87,14 @@ async def analyze_competitors(
         
         if not business_model_db:
             logger.info(f"Business model not found in database for {business_id}, trying MinIO fallback")
-            return await analyze_competitors_minio_fallback(business_id, request, background_tasks, db)
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "message": "Business model not found in database",
+                    "business_id": business_id
+                }
+            )
 
-        # Convert database model to the format expected by the analysis
-        business_model_data = {
-            'customer_persona': business_model_db.customer_persona,
-            'industry': business_model_db.industry,
-            'problem_definition': business_model_db.problem_definition,
-            'value_proposition': business_model_db.value_proposition,
-            'competitive_advantage': business_model_db.competitive_advantage,
-            'products_services': business_model_db.products_services,
-            'challenges_opportunities': business_model_db.challenges_opportunities
-        }
 
         business_idea_text = f"""
         {business_idea.title}:
@@ -148,6 +148,27 @@ async def analyze_competitors(
                 model=request.research_model
             )
             db.add(research_record)
+            
+            # Update business progress to indicate competitive analysis started
+            business_progress = db.query(BusinessProgress).filter(
+                BusinessProgress.business_id == business_id
+            ).first()
+            
+            if not business_progress:
+                # Create new progress record
+                business_progress = BusinessProgress(
+                    business_id=business_id,
+                    competitive_analysis_status=StepStatus.IN_PROGRESS,
+                    competitive_analysis_id=request_id
+                )
+                db.add(business_progress)
+                logger.info(f"Created new business progress record for {business_id}")
+            else:
+                # Update existing progress
+                business_progress.competitive_analysis_status = StepStatus.IN_PROGRESS
+                business_progress.competitive_analysis_id = request_id
+                logger.info(f"Updated existing business progress for {business_id}")
+            
             db.commit()
             logger.info(f"Created new research record with ID {request_id} for business {business_id} (triggered by {request.triggered_by})")
         
@@ -240,25 +261,63 @@ async def analyze_competitors(
             "triggered_by": request.triggered_by
         }
         
-        # Start the analysis in background if background_tasks is available
-        if background_tasks:
-            background_tasks.add_task(
-                controller.research_competitors_async,
+        # Start the analysis using TaskIQ instead of FastAPI background tasks
+        try:
+            # Convert BusinessModel to dictionary for serialization
+            business_model_dict = {
+                "business_idea": business_model.business_idea,
+                "customer_persona": business_model.customer_persona,
+                "industry": business_model.industry,
+                "problem_definition": business_model.problem_definition,
+                "value_proposition": business_model.value_proposition,
+                "competitive_advantage": business_model.competitive_advantage,
+                "products_services": business_model.products_services,
+                "challenges_opportunities": business_model.challenges_opportunities
+            }
+            
+            # Send task to TaskIQ queue
+            task = await research_competitors_task.kiq(
                 prompt_search=modified_prompt,
                 business_id=business_id,
                 request_id=request_id,
-                business_model=business_model,
+                business_model_dict=business_model_dict,
                 lang=request.language
             )
-        else:
-            # If no background_tasks, start it directly (for testing)
-            await controller.research_competitors_async(
-                prompt_search=modified_prompt,
-                business_id=business_id,
-                request_id=request_id,
-                business_model=business_model,
-                lang=request.language
-            )
+            
+            logger.info(f"TaskIQ task queued with ID: {task.task_id} for business {business_id}, request_id: {request_id} (triggered by {request.triggered_by})")
+            
+        except Exception as task_error:
+            logger.error(f"Error queueing TaskIQ task: {str(task_error)}")
+            # Fallback to direct execution for testing
+            try:
+                # Convert BusinessModel to dictionary for serialization
+                business_model_dict = {
+                    "business_idea": business_model.business_idea,
+                    "customer_persona": business_model.customer_persona,
+                    "industry": business_model.industry,
+                    "problem_definition": business_model.problem_definition,
+                    "value_proposition": business_model.value_proposition,
+                    "competitive_advantage": business_model.competitive_advantage,
+                    "products_services": business_model.products_services,
+                    "challenges_opportunities": business_model.challenges_opportunities
+                }
+                
+                await research_competitors_task(
+                    modified_prompt,
+                    business_id,
+                    request_id,
+                    business_model_dict,
+                    request.language
+                )
+            except Exception as fallback_error:
+                logger.error(f"Fallback execution also failed: {str(fallback_error)}")
+                # Update research status to failed
+                research_record.status = CompetitorResearchStatus.FAILED
+                db.commit()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to start competitor analysis: {str(fallback_error)}"
+                )
         
         logger.info(f"Competitor analysis started for business {business_id}, request_id: {request_id} (triggered by {request.triggered_by})")
 
@@ -283,100 +342,7 @@ async def analyze_competitors(
             detail=f"Server error: {str(e)}"
         )
 
-async def analyze_competitors_minio_fallback(
-    business_id: str,
-    request: InternalCompetitorAnalysisRequest,
-    background_tasks: BackgroundTasks,
-    db: Session
-) -> JSONResponse:
-    """
-    Fallback function to analyze competitors using MinIO for backward compatibility
-    """
-    try:
-        # Verify business idea exists
-        business_idea = db.query(BusinessIdea).filter(BusinessIdea.id == business_id).first()
-        if not business_idea:
-            raise HTTPException(status_code=404, detail="Business idea not found")
 
-        # Initialize MinIO service
-        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
-
-        business_model_object_path = f"{business_id}/business-understanding/business_model.json"
-
-        # Check if business model exists
-        if not minio_service.object_exists(business_model_object_path):
-            raise HTTPException(
-                status_code=404,
-                detail=f"Business model not found in database or MinIO for business_id: {business_id}"
-            )
-
-        # Get business model data
-        business_model_data = clean_json_encoding(minio_service.download_json(business_model_object_path))
-        
-        # Usar solamente la nueva estructura
-        if 'BusinessModelData' in business_model_data:
-            business_model_data = business_model_data['BusinessModelData']
-        else:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid business model structure: missing BusinessModelData field"
-            )
-
-        business_idea_text = f"""
-        {business_idea.title}:
-
-        DESCRIPCIÓN:
-        {business_idea.description}
-        """
-    
-        # Validate business model structure
-        try:
-            # Verificar que los campos necesarios existen
-            required_fields = ['customer_persona', 'industry']
-            missing_fields = [field for field in required_fields if field not in business_model_data or not business_model_data[field]]
-            
-            if missing_fields:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Missing required fields in business model: {', '.join(missing_fields)}"
-                )
-                
-            # Create comprehensive BusinessModel object with all available fields from MinIO
-            business_model = BusinessModel(
-                business_idea=business_idea_text,
-                customer_persona=business_model_data.get('customer_persona', ''),
-                industry=business_model_data.get('industry', ''),
-                problem_definition=business_model_data.get('problem_definition'),
-                value_proposition=business_model_data.get('value_proposition'),
-                competitive_advantage=business_model_data.get('competitive_advantage'),
-                products_services=business_model_data.get('products_services'),
-                challenges_opportunities=business_model_data.get('challenges_opportunities')
-            )
-        except ValueError as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid business model structure: {str(e)}"
-            )
-
-        # Continue with the rest of the original logic...
-        logger.info(f"Using MinIO fallback for business {business_id} (triggered by {request.triggered_by})")
-        
-        return JSONResponse(
-            status_code=202,
-            content={
-                "message": f"Competitor analysis started (MinIO fallback, triggered by {request.triggered_by})",
-                "business_id": business_id,
-                "status": "pending",
-                "triggered_by": request.triggered_by
-            }
-        )
-
-    except Exception as e:
-        logger.error(f"Error in MinIO fallback: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error in fallback analysis: {str(e)}"
-        )
 
 @router.get("/status/{request_id}")
 async def get_research_status(
@@ -409,7 +375,7 @@ async def get_research_status(
         
         # Check if results exist in MinIO
         minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
-        results_filename = f"{research.business_id}/competitor-analysis/competitors_{request_id}.json"
+        results_filename = f"{research.business_id}/competitor-analysis/competitors.json"
         
         if minio_service.object_exists(results_filename):
             results = minio_service.download_json(results_filename)

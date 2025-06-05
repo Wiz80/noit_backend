@@ -306,7 +306,7 @@ async def get_competitor_linkedin_company(
     competitor_name = competitor.competitor_name.lower()
     
     # Initialize MinIO service
-    minio_service = MinioService(bucket_name="lattice-businesses")
+    minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
     
     # Define the path for the company data
     object_path = f"{business_id}/competitor-analysis/linkedin/{competitor_name}/company.json"
@@ -367,7 +367,7 @@ async def get_competitor_linkedin_posts(
     competitor_name = competitor.competitor_name.lower()
     
     # Initialize MinIO service
-    minio_service = MinioService(bucket_name="lattice-businesses")
+    minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
     
     # Define the path for the posts data
     object_path = f"{business_id}/competitor-analysis/linkedin/{competitor_name}/post.json"
@@ -428,7 +428,7 @@ async def get_competitor_linkedin_ads(
     competitor_name = competitor.competitor_name.lower()
     
     # Initialize MinIO service
-    minio_service = MinioService(bucket_name="lattice-businesses")
+    minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
     
     # Define the path for the ads data
     object_path = f"{business_id}/competitor-analysis/linkedin/{competitor_name}/ads.json"
@@ -489,7 +489,7 @@ async def get_competitor_linkedin_all(
     competitor_name = competitor.competitor_name.lower()
     
     # Initialize MinIO service
-    minio_service = MinioService(bucket_name="lattice-businesses")
+    minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
     
     result = {
         "business_id": business_id,
@@ -564,7 +564,7 @@ async def get_business_competitors_combined_linkedin(
         )
     
     # Initialize MinIO service
-    minio_service = MinioService(bucket_name="lattice-businesses")
+    minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
     
     result = {
         "business_id": business_id,

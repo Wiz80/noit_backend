@@ -77,7 +77,7 @@ async def test_categorize_instagram_comments():
         )
         
         # Initialize MinioService to check for processed comments
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Define object paths
         processed_comments_object_name = f"{output_folder}/{instagram_username}/processed_comments_data.json"

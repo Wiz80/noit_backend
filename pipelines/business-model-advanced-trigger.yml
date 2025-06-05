@@ -1,32 +1,31 @@
-id: business-model-advanced-trigger
-namespace: business.understanding
-description: "Advanced pipeline to trigger competitor analysis when business models are created/updated"
+id: start-competitor-analysis
+namespace: noit.backend
+description: "Webhook-triggered pipeline to start competitor analysis when business models are completed"
 
 inputs:
-  - id: check_interval_minutes
-    type: INT
-    defaults: [2]
-    description: "How many minutes back to check for new/updated business models"
+  - id: business_id
+    type: STRING
+    required: true
+    description: "ID of the business that completed ETAPA 1"
   
-  - id: max_concurrent_analysis
-    type: INT
-    defaults: [3]
-    description: "Maximum number of concurrent competitor analyses"
+  - id: triggered_by
+    type: STRING
+    defaults: "brief_completion"
+    description: "Source that triggered this workflow"
 
 tasks:
-  - id: check_database_connection
-    type: io.kestra.plugin.jdbc.postgresql.Query
-    url: "jdbc:postgresql://postgres:5432/kestra"
-    username: "kestra"
-    password: "k3str4"
-    sql: "SELECT 1 as connection_test"
-    store: true
+  - id: log_webhook_trigger
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      🔔 Webhook triggered for business model completion
+      Business ID: {{ inputs.business_id }}
+      Triggered by: {{ inputs.triggered_by }}
 
-  - id: check_new_business_models
+  - id: validate_business_exists
     type: io.kestra.plugin.jdbc.postgresql.Query
-    url: "jdbc:postgresql://postgres:5432/kestra"
-    username: "kestra"
-    password: "k3str4"
+    url: "jdbc:postgresql://44.204.96.182:5432/business_ai"
+    username: "noit-user-dev"
+    password: "password"
     sql: |
       SELECT 
         bm.id as business_model_id,
@@ -53,216 +52,113 @@ tasks:
         END as has_pending_research
       FROM business_models bm
       LEFT JOIN business_ideas bi ON bm.business_id = bi.id
-      WHERE (bm.created_at >= NOW() - INTERVAL '{{ inputs.check_interval_minutes }} minutes'
-      OR bm.updated_at >= NOW() - INTERVAL '{{ inputs.check_interval_minutes }} minutes')
+      WHERE bm.business_id = '{{ inputs.business_id }}'
       AND bm.industry IS NOT NULL 
       AND bm.customer_persona IS NOT NULL
       AND LENGTH(TRIM(bm.industry)) > 0
       AND LENGTH(TRIM(bm.customer_persona)) > 0
-      ORDER BY bm.updated_at DESC
-      LIMIT 10
     store: true
 
-  - id: filter_valid_models
+  - id: trigger_competitor_analysis
+    type: io.kestra.plugin.core.http.Request
+    uri: "http://host.docker.internal:8000/api/v1/analyze-competitors/{{ inputs.business_id }}"
+    method: "POST"
+    contentType: "application/json"
+    headers:
+      Content-Type: "application/json"
+      User-Agent: "Kestra-Webhook-Pipeline/1.0"
+    body: |
+      {
+        "business_id": "{{ inputs.business_id }}",
+        "language": "es",
+        "validator_provider": "openai",
+        "validator_model": "openai:gpt-4o-mini",
+        "research_model": "sonar-deep-research",
+        "base_url": "http://host.docker.internal:8000",
+        "triggered_by": "{{ inputs.triggered_by }}"
+      }
+    timeout: "PT30S"
+
+  - id: process_analysis_response
     type: io.kestra.plugin.scripts.python.Script
     containerImage: python:3.11-alpine
     script: |
       import json
-      import sys
       
-      # Get business models from query
-      business_models = {{ outputs.check_new_business_models.rows }}
-      max_concurrent = {{ inputs.max_concurrent_analysis }}
+      # Check the response from the competitor analysis trigger
+      trigger_response = {{ outputs.trigger_competitor_analysis }}
+      business_id = "{{ inputs.business_id }}"
       
-      print(f"Found {len(business_models)} business models to check")
-      print(f"Max concurrent analyses allowed: {max_concurrent}")
+      print(f"🔍 Analysis response for business {business_id}:")
+      print(f"Status Code: {trigger_response.get('code', 'Unknown')}")
       
-      # Filter out models that already have pending research
-      valid_models = []
-      skipped_models = []
+      # Parse response body
+      body = trigger_response.get('body', {})
+      if isinstance(body, str):
+          try:
+              body = json.loads(body)
+          except:
+              print("Could not parse response body as JSON")
+              body = {}
       
-      for model in business_models:
-          if model.get('has_pending_research'):
-              skipped_models.append({
-                  'business_id': model['business_id'],
-                  'reason': 'Has pending research'
-              })
-              print(f"Skipping {model['business_id']}: Already has pending research")
-          else:
-              valid_models.append(model)
-              print(f"Valid model found: {model['business_id']} - {model['industry']}")
+      print(f"Response Body: {json.dumps(body, indent=2)}")
       
-      # Limit to max concurrent
-      if len(valid_models) > max_concurrent:
-          print(f"Limiting to {max_concurrent} concurrent analyses")
-          valid_models = valid_models[:max_concurrent]
-      
-      # Output results
-      print(f"Processing {len(valid_models)} business models")
-      print(f"Skipped {len(skipped_models)} business models")
-      
-      # Store in Kestra variables for the next task
-      import json
-      with open('/tmp/valid_models.json', 'w') as f:
-          json.dump(valid_models, f, default=str)
-      
-      with open('/tmp/skipped_models.json', 'w') as f:
-          json.dump(skipped_models, f, default=str)
+      # Check if successful
+      status_code = trigger_response.get('code', 500)
+      if status_code in [200, 202]:
+          print("✅ Competitor analysis successfully triggered")
+          
+          request_id = body.get('request_id', 'Unknown') if isinstance(body, dict) else 'Unknown'
+          print(f"📋 Request ID: {request_id}")
+          
+          # Store success info
+          with open('/tmp/analysis_result.json', 'w') as f:
+              json.dump({
+                  "success": True,
+                  "business_id": business_id,
+                  "request_id": request_id,
+                  "status_code": status_code,
+                  "message": body.get('message', 'Analysis started') if isinstance(body, dict) else 'Analysis started'
+              }, f, indent=2)
+          
+      else:
+          print(f"❌ Failed to trigger competitor analysis")
+          print(f"Error details: {body}")
+          
+          # Store error info but don't fail the workflow
+          with open('/tmp/analysis_result.json', 'w') as f:
+              json.dump({
+                  "success": False,
+                  "business_id": business_id,
+                  "status_code": status_code,
+                  "error": body,
+                  "message": "Failed to trigger analysis"
+              }, f, indent=2)
     outputFiles:
-      - "/tmp/valid_models.json"
-      - "/tmp/skipped_models.json"
+      - "/tmp/analysis_result.json"
 
-  - id: process_business_models
-    type: io.kestra.plugin.core.flow.ForEach
-    value: "{{ json(outputs.filter_valid_models.outputFiles['/tmp/valid_models.json']) }}"
-    tasks:
-      - id: validate_and_prepare
-        type: io.kestra.plugin.scripts.python.Script
-        containerImage: python:3.11-alpine
-        beforeCommands:
-          - pip install requests
-        script: |
-          import json
-          import sys
-          import requests
-          from datetime import datetime
-          
-          # Get the business model data from the current iteration
-          business_model = {{ taskrun.value }}
-          
-          print(f"Processing business model: {business_model['business_id']}")
-          print(f"Industry: {business_model['industry']}")
-          print(f"Customer Persona: {business_model['customer_persona']}")
-          print(f"Business Title: {business_model.get('business_title', 'N/A')}")
-          
-          # Double-check required fields
-          required_fields = ['customer_persona', 'industry', 'business_id']
-          for field in required_fields:
-              value = business_model.get(field, '').strip()
-              if not value:
-                  print(f"ERROR: Missing or empty field: {field}")
-                  sys.exit(1)
-          
-          print("✅ Business model validation passed")
-
-      - id: trigger_competitor_analysis
-        type: io.kestra.plugin.core.http.Request
-        uri: "http://host.docker.internal:8000/api/v1/analyze-competitors/{{ taskrun.value.business_id }}"
-        method: "POST"
-        contentType: "application/json"
-        headers:
-          Content-Type: "application/json"
-          User-Agent: "Kestra-Pipeline/1.0"
-        body: |
-          {
-            "business_id": "{{ taskrun.value.business_id }}",
-            "language": "es",
-            "research_model": "gpt-4",
-            "search_prompt": "Análisis detallado de competidores para {{ taskrun.value.business_title }} en la industria de {{ taskrun.value.industry }}",
-            "base_url": "http://host.docker.internal:8000",
-            "triggered_by": "kestra_advanced_automation"
-          }
-        timeout: "PT30S"  # 30 seconds timeout
-
-      - id: verify_analysis_started
-        type: io.kestra.plugin.scripts.python.Script
-        containerImage: python:3.11-alpine
-        script: |
-          import json
-          
-          # Check the response from the competitor analysis trigger
-          trigger_response = {{ outputs.trigger_competitor_analysis }}
-          business_model = {{ taskrun.value }}
-          
-          print(f"Response for business {business_model['business_id']}:")
-          print(f"Status Code: {trigger_response.get('code', 'Unknown')}")
-          print(f"Response Body: {json.dumps(trigger_response.get('body', {}), indent=2)}")
-          
-          # Check if successful
-          status_code = trigger_response.get('code', 500)
-          if status_code in [200, 202]:
-              print("✅ Competitor analysis successfully triggered")
-              
-              # Extract request_id if available
-              body = trigger_response.get('body', {})
-              if isinstance(body, str):
-                  try:
-                      body = json.loads(body)
-                  except:
-                      pass
-              
-              request_id = body.get('request_id', 'Unknown') if isinstance(body, dict) else 'Unknown'
-              print(f"Request ID: {request_id}")
-              
-          else:
-              print(f"❌ Failed to trigger competitor analysis")
-              print(f"Error details: {trigger_response.get('body', 'No details')}")
-              # Don't fail the entire flow, just log the error
-              
-      - id: log_success
-        type: io.kestra.plugin.core.log.Log
-        message: "Successfully processed business_id: {{ taskrun.value.business_id }} ({{ taskrun.value.industry }})"
-
-  - id: generate_summary_report
-    type: io.kestra.plugin.scripts.python.Script
-    containerImage: python:3.11-alpine
-    script: |
-      import json
-      from datetime import datetime
+  - id: log_completion
+    type: io.kestra.plugin.core.log.Log
+    message: |
+      🎯 Webhook processing completed for business: {{ inputs.business_id }}
       
-      print("=== BUSINESS MODEL PROCESSING SUMMARY ===")
-      print(f"Execution Time: {datetime.now().isoformat()}")
+      Analysis Result: {{ json(outputs.process_analysis_response.outputFiles['/tmp/analysis_result.json']).success ? '✅ SUCCESS' : '❌ FAILED' }}
       
-      # Get the original count
-      all_models = {{ outputs.check_new_business_models.rows }}
-      print(f"Total business models found: {len(all_models)}")
+      Request ID: {{ json(outputs.process_analysis_response.outputFiles['/tmp/analysis_result.json']).request_id ?? 'N/A' }}
       
-      # Count how many were processed
-      try:
-          with open('/tmp/valid_models.json', 'r') as f:
-              valid_models = json.load(f)
-          print(f"Valid models processed: {len(valid_models)}")
-          
-          for model in valid_models:
-              print(f"  - {model['business_id']}: {model['industry']}")
-              
-      except Exception as e:
-          print(f"Could not read valid models: {e}")
-      
-      try:
-          with open('/tmp/skipped_models.json', 'r') as f:
-              skipped_models = json.load(f)
-          print(f"Models skipped: {len(skipped_models)}")
-          
-          for model in skipped_models:
-              print(f"  - {model['business_id']}: {model['reason']}")
-              
-      except Exception as e:
-          print(f"Could not read skipped models: {e}")
-      
-      print("=== END SUMMARY ===")
+      Business Details:
+      - Title: {{ inputs.business_title ?? 'Unknown' }}
+      - Industry: {{ inputs.industry ?? 'Unknown' }}
+      - Triggered by: {{ inputs.triggered_by }}
 
 triggers:
-  - id: schedule_check
-    type: io.kestra.plugin.core.trigger.Schedule
-    cron: "*/2 * * * *"  # Check every 2 minutes
-    inputs:
-      check_interval_minutes: 2
-      max_concurrent_analysis: 3
+  - id: business_model_webhook
+    type: io.kestra.plugin.core.trigger.Webhook
+    key: "competitor_analysis_trigger"
+    conditions:
+      - type: io.kestra.plugin.core.condition.ExecutionOutputs
+        expression: "{{ trigger.body.event == 'business_model_completed' }}"
 
   - id: manual_trigger
     type: io.kestra.plugin.core.trigger.Webhook
-    key: "business_model_manual_trigger"
-    inputs:
-      check_interval_minutes: 10  # Look back 10 minutes for manual runs
-      max_concurrent_analysis: 5
-
-  - id: webhook_trigger
-    type: io.kestra.plugin.core.trigger.Webhook
-    key: "business_model_webhook_key"
-    conditions:
-      - type: "io.kestra.plugin.core.condition.ExpressionCondition"
-        expression: "{{ trigger.body.action == 'business_model_created' }}"
-    inputs:
-      check_interval_minutes: 1  # Only look back 1 minute for webhook triggers
-      max_concurrent_analysis: 1 
+    key: "competitor_analysis_trigger"

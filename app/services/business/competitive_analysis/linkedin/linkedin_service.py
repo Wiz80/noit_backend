@@ -195,7 +195,7 @@ class LinkedInService:
             "ads": {"combined": False}
         }
         
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Create a mapping of competitor_id to competitor_name if provided
         competitor_name_map = {}

@@ -15,13 +15,14 @@ from app.schemas.business.business_competitors import WebsiteSocialMediaScraping
 
 from app.utils.decode_json import clean_json_encoding
 
+# Import TaskIQ task
+from app.tasks.social_media_extraction_tasks import extract_social_media_from_websites_task
+# Import task progress service
+from app.services.cache.task_progress_service import get_task_progress_service
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Simple cache to store task progress
-# In production, you should use Redis or similar
-analysis_progress = {}
 
 router = APIRouter()
 
@@ -34,15 +35,16 @@ async def extract_social_media_from_websites(
 ):
     """
     Extract social media information from competitor websites using AI-powered scraping.
+    This endpoint queues the task using TaskIQ for distributed processing.
     
     Args:
         business_id: UUID of the business idea
         request: WebsiteSocialMediaScrapingRequest with optional competitor_ids list and update_db flag
-        background_tasks: FastAPI background tasks
+        background_tasks: FastAPI background tasks (not used with TaskIQ)
         db: Database session
         
     Returns:
-        WebsiteSocialMediaScrapingResponse: Task information and results
+        WebsiteSocialMediaScrapingResponse: Task information
     """
     try:
         # Verify if business_id exists
@@ -71,50 +73,49 @@ async def extract_social_media_from_websites(
         # Generate a unique task ID
         task_id = str(uuid.uuid4())
         
-        # Initialize progress
-        analysis_progress[task_id] = {
-            "progress": 0,
-            "status": "started",
-            "results": {},
-            "error": None
-        }
-
-        # Initialize controller
-        controller = WebsiteExtractionController(business_id=str(business_id))
+        # Get progress service
+        progress_service = get_task_progress_service()
         
-        # Create a progress callback function
-        def update_progress(task_id, progress, status, results):
-            if task_id in analysis_progress:
-                analysis_progress[task_id].update({
-                    "progress": progress,
-                    "status": status,
-                    "results": results
-                })
-
-        # Run extraction here instead of in background
-        await async_extraction_wrapper(
-            controller=controller,
-            competitor_ids=[comp.id for comp in competitors_with_websites],
+        # Initialize progress in Redis
+        progress_service.set_task_progress(
             task_id=task_id,
-            update_db=request.update_db,
-            db=db,
-            progress_callback=update_progress
+            progress=0,
+            status="queued"
         )
+
+        # Send task to TaskIQ queue instead of running directly
+        try:
+            taskiq_task = await extract_social_media_from_websites_task.kiq(
+                business_id=str(business_id),
+                competitor_ids=[comp.id for comp in competitors_with_websites],
+                task_id=task_id,
+                update_db=request.update_db
+            )
+            
+            logger.info(f"📤 TaskIQ task queued with ID: {taskiq_task.task_id} for social media extraction")
+            
+            # Update progress to indicate task was queued and store TaskIQ task ID
+            progress_service.update_task_progress(task_id, {
+                "status": "queued",
+                "taskiq_task_id": taskiq_task.task_id
+            })
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to queue TaskIQ task: {str(e)}")
+            progress_service.set_task_failed(task_id, f"Failed to queue task: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to queue extraction task: {str(e)}")
 
         return WebsiteSocialMediaScrapingResponse(
             task_id=task_id,
-            status="processing",
+            status="queued",
             results=None
         )
 
     except Exception as e:
         # If there was a task_id created, update its status
         if 'task_id' in locals():
-            analysis_progress[task_id] = {
-                "status": "failed",
-                "error": str(e),
-                "progress": 0
-            }
+            progress_service = get_task_progress_service()
+            progress_service.set_task_failed(task_id, str(e))
         
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -135,59 +136,17 @@ async def get_social_media_extraction_progress(
     Returns:
         WebsiteSocialMediaScrapingResponse: Task progress information
     """
-    if task_id not in analysis_progress:
+    # Get progress service
+    progress_service = get_task_progress_service()
+    
+    # Get progress data from Redis
+    progress_data = progress_service.get_task_progress(task_id)
+    
+    if progress_data is None:
         raise HTTPException(status_code=404, detail="Task not found")
-
-    progress_data = analysis_progress[task_id]
     
     return WebsiteSocialMediaScrapingResponse(
         task_id=task_id,
         status=progress_data["status"],
         results=progress_data.get("results")
     )
-
-async def async_extraction_wrapper(
-    controller: WebsiteExtractionController,
-    competitor_ids: List[str],
-    task_id: str,
-    update_db: bool,
-    db: Session,
-    progress_callback: callable
-):
-    """
-    Wrapper function to handle the controller's async execution and finalize the results.
-    
-    Args:
-        controller: WebsiteExtractionController instance
-        competitor_ids: List of competitor IDs to process
-        task_id: Task identifier
-        update_db: Whether to update the database with the results
-        db: Database session
-        progress_callback: Callback function for progress updates
-    """
-    try:
-        # Run extraction and get final result
-        final_result = await controller.run_website_social_media_extraction(
-            competitor_ids=competitor_ids,
-            task_id=task_id,
-            update_db=update_db,
-            db=db,
-            progress_callback=progress_callback
-        )
-        
-        # Update final status in progress cache
-        if task_id in analysis_progress:
-            analysis_progress[task_id].update({
-                "progress": 100,
-                "status": final_result["status"],
-                "results": final_result["results"],
-                "error": final_result.get("error")
-            })
-            
-    except Exception as e:
-        # Update error status in progress cache
-        if task_id in analysis_progress:
-            analysis_progress[task_id].update({
-                "status": "failed",
-                "error": str(e)
-            })

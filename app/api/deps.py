@@ -64,7 +64,7 @@ def get_minio_client() -> MinioService:
     if _minio_service_instance is None:
         # Just create the service object without connecting to MinIO
         # The actual connection will be established on first use
-        _minio_service_instance = MinioService(bucket_name=settings.MINIO_BUSINESS_BUCKET)
+        _minio_service_instance = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         logging.info("MinioService instance created (lazy loading - not connected yet)")
     return _minio_service_instance
 

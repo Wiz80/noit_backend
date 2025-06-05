@@ -33,7 +33,7 @@ async def test_process_posts_images():
         analyzer = InstagramImageAnalyzer(api_key=api_key, output_folder=output_folder)
         
         # Initialize MinioService to fetch Instagram posts
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         posts_object_name = f"{output_folder}/{instagram_username}/instagram_posts.json"
         
         print(f"📂 Fetching Instagram posts from MinIO: {posts_object_name}")
@@ -115,7 +115,7 @@ async def test_analyze_instagram_feed():
         analyzer = InstagramImageAnalyzer(api_key=api_key, output_folder=output_folder)
         
         # Initialize MinioService to fetch Instagram posts
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         posts_object_name = f"{output_folder}/{instagram_username}/instagram_posts.json"
         
         print(f"📂 Fetching Instagram posts from MinIO: {posts_object_name}")

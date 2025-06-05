@@ -19,6 +19,14 @@ from app.services.business.competitive_analysis.instagram.comments.instagram_sen
 from app.services.business.competitive_analysis.instagram.comments.instagram_topic_modeling import InstagramTopicModeling
 from app.services.storage.minio_service import MinioService
 
+# Import TaskIQ task
+from app.tasks.instagram_analysis_tasks import complete_instagram_comments_analysis_task
+# Import task progress service
+from app.services.cache.task_progress_service import get_task_progress_service
+
+import logging
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 # Models for request and response schemas
@@ -74,6 +82,9 @@ class CompleteCommentsAnalysisRequest(BaseModel):
     model: str = "openai:gpt-4o-mini"
     lang: str = "en"
     run_in_background: bool = True
+
+# Import settings
+from app.core.config import settings
 
 # Endpoints
 @router.post("/{business_id}/scrape-comments", response_model=ScrapeCommentsResponse)
@@ -308,17 +319,17 @@ async def complete_comments_analysis(
     db: Session = Depends(get_db)
 ):
     """
-    Run a complete analysis on Instagram comments for a specific username,
+    Run a complete analysis on Instagram comments for a specific username using TaskIQ,
     including categorization, sentiment analysis, and topic modeling.
     
     Args:
         business_id: UUID of the business idea
         request: CompleteCommentsAnalysisRequest with all parameters
-        background_tasks: Background tasks runner
+        background_tasks: Background tasks runner (deprecated, using TaskIQ)
         db: Database session
         
     Returns:
-        dict: Analysis initiation status
+        dict: Analysis initiation status with task_id for progress tracking
     """
     try:
         # Extract parameters from request
@@ -340,62 +351,172 @@ async def complete_comments_analysis(
         if not instagram_user:
             raise HTTPException(status_code=404, detail=f"Instagram user {username} not found. You may need to scrape this profile first.")
         
-        # Define the analysis function to run in the background
-        async def run_complete_analysis():
-            output_folder = f"{business_id}/competitor-analysis/instagram"
-            
+        # Generate a unique task ID
+        task_id = str(uuid.uuid4())
+        
+        # Get progress service
+        progress_service = get_task_progress_service()
+        
+        # Initialize progress in Redis
+        progress_service.set_task_progress(
+            task_id=task_id,
+            progress=0,
+            status="queued"
+        )
+
+        # Check if we should run in background (TaskIQ) or synchronously
+        if run_in_background:
+            # Send task to TaskIQ queue
             try:
-                # 1. Run comment categorization
-                comment_categorizer = InstagramCommentCategorizer(
+                taskiq_task = await complete_instagram_comments_analysis_task.kiq(
+                    business_id=str(business_id),
                     username=username,
-                    output_folder=output_folder,
-                    provider=provider.split(':')[0] if ':' in provider else provider,
-                    model=model
-                )
-                await comment_categorizer.run_analysis()
-                
-                # 2. Run sentiment and emotion analysis
-                sentiment_analyzer = InstagramSentimentEmotionAnalyzer(
-                    username=username,
-                    output_folder=output_folder
-                )
-                await sentiment_analyzer.analyze_sentiment_and_emotions()
-                
-                # 3. Run topic modeling
-                topic_modeling = InstagramTopicModeling(
-                    username=username,
-                    output_folder=output_folder,
+                    task_id=task_id,
                     num_topics=num_topics,
+                    max_comments=max_comments,
+                    provider=provider,
+                    model=model,
                     lang=lang
                 )
-                await topic_modeling.run_lda_analysis()
                 
-                # Update status in database
-                # This would typically update a job status table
+                logger.info(f"📤 TaskIQ comments analysis task queued with ID: {taskiq_task.task_id} for user {username}")
+                
+                # Update progress to indicate task was queued and store TaskIQ task ID
+                progress_service.update_task_progress(task_id, {
+                    "status": "queued",
+                    "taskiq_task_id": taskiq_task.task_id
+                })
+                
+                return {
+                    "status": "queued",
+                    "message": f"Complete comments analysis for {username} queued successfully",
+                    "username": username,
+                    "business_id": str(business_id),
+                    "task_id": task_id
+                }
                 
             except Exception as e:
-                # Log the error and update status in database
-                print(f"Error in complete analysis for {username}: {str(e)}")
-        
-        # Check if we should run in background or synchronously based on the parameter
-        if run_in_background and background_tasks:
-            background_tasks.add_task(run_complete_analysis)
-            return {
-                "status": "processing",
-                "message": f"Complete comments analysis for {username} started in background",
-                "username": username,
-                "business_id": str(business_id)
-            }
+                logger.error(f"❌ Failed to queue TaskIQ comments analysis task: {str(e)}")
+                progress_service.set_task_failed(task_id, f"Failed to queue task: {str(e)}")
+                raise HTTPException(status_code=500, detail=f"Failed to queue comments analysis task: {str(e)}")
         else:
-            # Run synchronously
-            await run_complete_analysis()
-            return {
-                "status": "completed",
-                "message": f"Complete comments analysis for {username} completed",
-                "username": username,
-                "business_id": str(business_id)
-            }
+            # Run task synchronously through TaskIQ (wait for result)
+            try:
+                taskiq_task = await complete_instagram_comments_analysis_task.kiq(
+                    business_id=str(business_id),
+                    username=username,
+                    task_id=task_id,
+                    num_topics=num_topics,
+                    max_comments=max_comments,
+                    provider=provider,
+                    model=model,
+                    lang=lang
+                )
+                
+                # Wait for result (with timeout)
+                result = await taskiq_task.wait_result(timeout=300)  # 5 minutes timeout
+                
+                if result.is_err:
+                    raise HTTPException(status_code=500, detail=f"Comments analysis failed: {result.error}")
+                
+                return {
+                    "status": "completed",
+                    "message": f"Complete comments analysis for {username} completed successfully",
+                    "username": username,
+                    "business_id": str(business_id),
+                    "task_id": task_id,
+                    "results": result.return_value.get("results", {})
+                }
+                
+            except Exception as e:
+                logger.error(f"❌ Failed to execute TaskIQ comments analysis task: {str(e)}")
+                progress_service.set_task_failed(task_id, str(e))
+                raise HTTPException(status_code=500, detail=f"Comments analysis failed: {str(e)}")
 
+    except Exception as e:
+        # If there was a task_id created, update its status
+        if 'task_id' in locals():
+            progress_service = get_task_progress_service()
+            progress_service.set_task_failed(task_id, str(e))
+        
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{business_id}/complete-comments-analysis/task/{task_id}")
+async def get_comments_analysis_progress(
+    business_id: UUID,
+    task_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get the progress of complete Instagram comments analysis for a specific task.
+    
+    Args:
+        business_id: UUID of the business idea
+        task_id: Task identifier
+        db: Database session
+        
+    Returns:
+        dict: Task progress information
+    """
+    try:
+        # Verify if business_id exists
+        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
+            raise HTTPException(status_code=404, detail="Business idea not found")
+        
+        # Get progress service
+        progress_service = get_task_progress_service()
+        
+        # Get progress data from Redis
+        progress_data = progress_service.get_task_progress(task_id)
+        
+        if progress_data is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        return {
+            "task_id": task_id,
+            "progress": progress_data["progress"],
+            "status": progress_data["status"],
+            "results": progress_data.get("results"),
+            "error": progress_data.get("error"),
+            "business_id": str(business_id)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Optional: Endpoint to cancel an ongoing comments analysis
+@router.delete("/complete-comments-analysis/task/{task_id}")
+async def cancel_comments_analysis(task_id: str, db: Session = Depends(get_db)):
+    """
+    Cancel an ongoing Instagram comments analysis.
+    
+    Args:
+        task_id: Task identifier
+        db: Database session
+        
+    Returns:
+        dict: Cancellation confirmation message
+    """
+    try:
+        # Get progress service
+        progress_service = get_task_progress_service()
+        
+        # Check if task exists
+        progress_data = progress_service.get_task_progress(task_id)
+        if progress_data is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        # Update task status to cancelled
+        progress_service.update_task_progress(task_id, {
+            "status": "cancelled"
+        })
+        
+        return {"message": "Instagram comments analysis cancelled successfully", "task_id": task_id}
+        
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -428,7 +549,7 @@ async def get_comment_categories(
             raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
         
         # Inicializar servicio MinIO
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Ruta del archivo
         file_path = f"{business_id}/competitor-analysis/instagram/{username}/dynamic_categorized_comments.json"
@@ -476,7 +597,7 @@ async def get_sentiment_analysis(
             raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
         
         # Inicializar servicio MinIO
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Ruta del archivo
         file_path = f"{business_id}/competitor-analysis/instagram/{username}/sentiment_analysis.json"
@@ -524,7 +645,7 @@ async def get_emotion_analysis(
             raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
         
         # Inicializar servicio MinIO
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Ruta del archivo
         file_path = f"{business_id}/competitor-analysis/instagram/{username}/emotion_analysis.json"
@@ -572,7 +693,7 @@ async def get_topic_analysis(
             raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
         
         # Inicializar servicio MinIO
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Ruta del archivo
         file_path = f"{business_id}/competitor-analysis/instagram/{username}/lda_topics.json"
@@ -620,7 +741,7 @@ async def get_combined_analysis(
             raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
         
         # Inicializar servicio MinIO
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Ruta del archivo
         file_path = f"{business_id}/competitor-analysis/instagram/{username}/combined_analysis_report.json"
@@ -668,7 +789,7 @@ async def get_wordcloud(
             raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
         
         # Inicializar servicio MinIO
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Ruta del archivo
         file_path = f"{business_id}/competitor-analysis/instagram/{username}/wordcloud.png"

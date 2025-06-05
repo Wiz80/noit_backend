@@ -795,13 +795,6 @@ class EnhancedBusinessAnalyzer:
                 config=research_config
             )
             
-            # Start the asynchronous research in a non-blocking way
-            # We don't need to await this since we want to return immediately
-            # Create a background task instead of awaiting
-            # background_task = asyncio.create_task(
-            #     research_module.research(prompt_search)
-            # )
-
             await research_module.research(prompt_search)
             
             # Log that we've started the task and will continue without waiting

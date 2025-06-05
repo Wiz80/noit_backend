@@ -10,7 +10,7 @@ class BaseInstagramAnalyzer:
         self.output_folder = output_folder
         self.post_limit = post_limit
         self.image_limit = image_limit
-        self.minio_service = MinioService(bucket_name="lattice-businesses")
+        self.minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
 
     async def load_comments(self):
         """Loads Instagram comments from MinIO."""

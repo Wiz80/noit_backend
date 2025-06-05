@@ -33,7 +33,7 @@ class InstagramCompetitorController:
         self.instagram_scraper = InstagramScraper(
             api_key=os.getenv("APIFY_API_KEY"),
             output_folder=f"{business_id}/competitor-analysis/instagram",
-            bucket_name="lattice-businesses"
+            bucket_name=settings.MINIO_BUCKET_NAME
         )
     
     async def analyze_instagram_competitor(self, username, competitor_id=None, results_limit=10, max_comments=5):

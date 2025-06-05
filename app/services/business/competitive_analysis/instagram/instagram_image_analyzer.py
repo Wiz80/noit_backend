@@ -37,7 +37,7 @@ class InstagramImageAnalyzer:
         self.api_key = api_key
         self.output_folder = output_folder
         self.client = OpenAI(api_key=api_key)
-        self.minio_service = MinioService(bucket_name="lattice-businesses")
+        self.minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
 
     async def encode_image_from_minio(self, object_name):
         """Encodes an image from MinIO storage to Base64 format."""

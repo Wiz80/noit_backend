@@ -108,7 +108,7 @@ class BusinessCanvasModule(BaseBusinessModule):
                 file_name=file_name,
                 file_path=file_path,
                 mime_type="application/json",
-                bucket_name="lattice-businesses",
+                bucket_name=settings.MINIO_BUCKET_NAME,
             )
             self.db.add(business_canvas)
             self.db.commit()

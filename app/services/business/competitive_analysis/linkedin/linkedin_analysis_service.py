@@ -55,7 +55,7 @@ class LinkedInAnalysisService:
     
     def __init__(self):
         """Initialize the LinkedIn analysis service with necessary tools"""
-        self.minio_service = MinioService(bucket_name="lattice-businesses")
+        self.minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         self.sentiment_analyzer = SentimentIntensityAnalyzer()
         self.stop_words = set(stopwords.words('english'))
         

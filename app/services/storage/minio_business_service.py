@@ -6,7 +6,7 @@ from minio.error import S3Error
 
 class MinioBusinessService(MinioService):
     def __init__(self):
-        super().__init__(bucket_name=settings.MINIO_BUSINESS_BUCKET)
+        super().__init__(bucket_name=settings.MINIO_BUCKET_NAME)
     
     async def initialize_business_folders(self, business_id: int) -> bool:
         """

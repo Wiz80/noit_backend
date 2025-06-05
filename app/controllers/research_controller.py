@@ -77,7 +77,7 @@ class ResearchController:
         try:
             # Initialize MinIO client if not provided
             if minio_client is None:
-                minio_client = MinioService(bucket_name="lattice-businesses")
+                minio_client = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
             
             # Route based on research type first
             if research_type in ["market_research", "state_of_art"]:

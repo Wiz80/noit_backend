@@ -76,7 +76,7 @@ async def test_instagram_topic_modeling():
         )
         
         # Initialize MinioService to check for categorized comments
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Define object paths
         categorized_comments_object_name = f"{output_folder}/dynamic_categorized_comments.json"

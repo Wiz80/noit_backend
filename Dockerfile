@@ -43,7 +43,4 @@ RUN python -m spacy download en_core_web_sm
 COPY . .
 
 # Expose the port the app runs on
-EXPOSE 8000
-
-# Command to run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"] 
+EXPOSE 8000 

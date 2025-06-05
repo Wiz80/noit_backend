@@ -5,6 +5,8 @@ Intelligent chat system for conducting business brief interviews using multiple 
 import json
 import logging
 import os
+import httpx
+import asyncio
 from typing import Dict, List, Optional, Any, Tuple, Union
 from datetime import datetime
 
@@ -325,7 +327,7 @@ class BriefAgentService:
             return phase, question
         return None
         
-    def run_agent_turn(self, message: str, session_data: Dict[str, Any]) -> Dict[str, Any]:
+    async def run_agent_turn(self, message: str, session_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Main method to process a turn in the brief conversation using CrewAI flow
         
@@ -349,7 +351,7 @@ class BriefAgentService:
             if is_start:
                 return self._handle_welcome_flow(current_index, business_data, answers, chat_history)
             else:
-                return self._handle_conversation_flow(message, current_index, business_data, answers, chat_history)
+                return await self._handle_conversation_flow(message, current_index, business_data, answers, chat_history)
                 
         except Exception as e:
             logger.error(f"Error in run_agent_turn: {str(e)}")
@@ -432,7 +434,7 @@ Comenzemos con la primera pregunta:
             "current_question_index": current_index
         }
     
-    def _handle_conversation_flow(self, message: str, current_index: int, business_data: Dict, answers: Dict, chat_history: List) -> Dict[str, Any]:
+    async def _handle_conversation_flow(self, message: str, current_index: int, business_data: Dict, answers: Dict, chat_history: List) -> Dict[str, Any]:
         """Handle ongoing conversation flow with intelligent response refinement"""
         
         # Get current question details
@@ -713,6 +715,14 @@ Comenzemos con la primera pregunta:
 He procesado y estructurado toda la información de tu modelo de negocio. Esta información se ha guardado automáticamente y estará disponible para análisis posteriores.
 
 Ahora continuaremos con la siguiente fase:"""
+            
+            # Make webhook call to Kestra to trigger competitor analysis
+            try:
+                await self._trigger_kestra_webhook(business_data, business_model_mapping)
+                logger.info(f"Successfully triggered Kestra webhook for business {business_data.get('id')}")
+            except Exception as e:
+                logger.error(f"Failed to trigger Kestra webhook: {str(e)}")
+                # Don't fail the conversation, just log the error
         
         response_msg = f"""{base_msg}
 
@@ -905,6 +915,57 @@ El brief está completo y guardado en tu sesión."""
         )
         
         return task
+
+    async def _trigger_kestra_webhook(self, business_data: Dict, business_model_mapping: Dict):
+        """
+        Trigger Kestra webhook to start competitor analysis after ETAPA 1 completion
+        
+        Args:
+            business_data: Business information from the session
+            business_model_mapping: Mapped business model data from ETAPA 1
+        """
+        try:
+            kestra_host = os.getenv("KESTRA_HOST", "http://localhost:8080")
+            # Get webhook configuration from environment
+            kestra_webhook_url = f"{kestra_host}/api/v1/executions/webhook/noit.backend/start-competitor-analysis/competitor_analysis_trigger"
+            
+            # Prepare webhook payload
+            webhook_payload = {
+                "event": "business_model_completed",
+                "business_id": business_data.get("id"),
+                "business_title": business_data.get("title", "Unknown"),
+                "industry": business_model_mapping.get("industry", "Unknown"),
+                "triggered_by": "brief_etapa1_completion",
+                "timestamp": datetime.now().isoformat(),
+                "business_model_data": business_model_mapping
+            }
+            
+            # Make async HTTP request to Kestra webhook
+            timeout = httpx.Timeout(30.0)  # 30 seconds timeout
+            
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(
+                    kestra_webhook_url,
+                    json=webhook_payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "User-Agent": "Brief-Agent-Service/1.0"
+                    }
+                )
+                
+                if response.status_code in [200, 201, 202]:
+                    logger.info(f"Successfully triggered Kestra webhook for business {business_data.get('id')}")
+                    logger.info(f"Kestra response: {response.status_code} - {response.text[:200]}")
+                else:
+                    logger.warning(f"Kestra webhook returned status {response.status_code}: {response.text[:200]}")
+                    
+        except httpx.TimeoutException:
+            logger.error(f"Timeout calling Kestra webhook for business {business_data.get('id')}")
+        except httpx.RequestError as e:
+            logger.error(f"Request error calling Kestra webhook: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error calling Kestra webhook: {str(e)}")
+            # Don't raise the error to avoid breaking the conversation flow
 
 
 # Helper functions for backwards compatibility

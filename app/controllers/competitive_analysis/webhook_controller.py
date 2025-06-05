@@ -8,10 +8,14 @@ from dotenv import load_dotenv
 from app.api import deps
 from app.models.business.competitive_analysis.business_competitor import CompetitorResearch, CompetitorResearchStatus
 from app.models.business.business_idea import BusinessIdea
+from app.models.business.business_understanding.business_model import BusinessModel as BusinessModelDB
 from app.services.business.competitive_analysis.business_competitors_extraction import EnhancedBusinessAnalyzer, BusinessModel
 from app.services.storage.minio_service import MinioService
 import app.prompts.business.prompts_business_competitors as prompts
 from app.utils.decode_json import clean_json_encoding
+
+# Import settings
+from app.core.config import settings
 
 load_dotenv()
 
@@ -86,23 +90,19 @@ class WebhookController:
                 if status == "completed":
                     # Aquí agregamos la lógica para procesar los datos de competidores recibidos
                     
-                    # Primero, obtenemos el business model para inicializar el analyzer
-                    minio_service = MinioService(bucket_name="lattice-businesses")
-                    business_model_object_path = f"{business_id}/business-understanding/business_model.json"
+                    # Obtener el business model desde la base de datos
+                    business_model_db = db_session.query(BusinessModelDB).filter(
+                        BusinessModelDB.business_id == business_id
+                    ).first()
                     
-                    # Verificamos si el business model existe
-                    if not minio_service.object_exists(business_model_object_path):
-                        logger.error(f"Business model {business_model_object_path} not found")
+                    if not business_model_db:
+                        logger.error(f"Business model no encontrado para business_id: {business_id}")
                         research.status = CompetitorResearchStatus.ERROR
-                        research.error_message = f"Business model not found: {business_model_object_path}"
+                        research.error_message = f"Business model not found for business_id: {business_id}"
                         db_session.commit()
                         return
                     
                     try:
-                        # Obtener los datos del modelo de negocio
-                        business_model_data = clean_json_encoding(minio_service.download_json(business_model_object_path))
-                        business_model_data = business_model_data.get('MarketResearchModule', {})
-                        
                         # Crear texto descriptivo del business idea
                         business_idea_text = f"""
                         {business.title}:
@@ -111,11 +111,16 @@ class WebhookController:
                         {business.description}
                         """
                         
-                        # Crear objeto BusinessModel
+                        # Crear objeto BusinessModel para el analyzer usando todos los campos de la base de datos
                         business_model = BusinessModel(
-                            business_idea = business_idea_text,
-                            customer_persona = business_model_data.get('customer_persona', ''),
-                            industry = business_model_data.get('industry', '')
+                            business_idea=business_idea_text,
+                            customer_persona=business_model_db.customer_persona or '',
+                            industry=business_model_db.industry or '',
+                            problem_definition=business_model_db.problem_definition or None,
+                            value_proposition=business_model_db.value_proposition or None,
+                            competitive_advantage=business_model_db.competitive_advantage or None,
+                            products_services=business_model_db.products_services or None,
+                            challenges_opportunities=business_model_db.challenges_opportunities or None
                         )
                         
                         # Crear el analizador
@@ -174,7 +179,8 @@ class WebhookController:
                         db_session.commit()
                         
                         # Guardar resultados estructurados en MinIO
-                        results_filename = f"{business_id}/competitor-analysis/competitors_{research.id}.json"
+                        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
+                        results_filename = f"{business_id}/competitor-analysis/competitors.json"
                         final_results = {
                             "request_id": research.id,
                             "business_id": business_id,
@@ -203,8 +209,8 @@ class WebhookController:
                     
                     # Almacenar el estado de error en MinIO
                     try:
-                        minio_service = MinioService(bucket_name="lattice-businesses")
-                        results_filename = f"{business_id}/competitor-analysis/competitors_{research.id}.json"
+                        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
+                        results_filename = f"{business_id}/competitor-analysis/competitors.json"
                         
                         error_results = {
                             "request_id": research.id,

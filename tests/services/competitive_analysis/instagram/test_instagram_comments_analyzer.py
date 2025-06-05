@@ -48,7 +48,7 @@ async def test_transform_instagram_comments():
         )
         
         # Initialize MinioService to fetch data
-        minio_service = MinioService(bucket_name="lattice-businesses")
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Define object paths
         comments_object_name = f"{output_folder}/{instagram_username}/comments_data.json"

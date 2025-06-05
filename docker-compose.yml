@@ -13,20 +13,6 @@ services:
     ports:
       - "5432:5432"
     restart: always
-  
-  postgres_kestra:
-    image: postgres
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    environment:
-      POSTGRES_DB: ${KESTRA_POSTGRES_DB:-kestra}
-      POSTGRES_USER: ${KESTRA_POSTGRES_USER:-kestra}
-      POSTGRES_PASSWORD: ${KESTRA_POSTGRES_PASSWORD}
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
 
   redis:
     image: redis:6.2-alpine
@@ -48,7 +34,7 @@ services:
     command: >
       bash -c "
         echo '🚀 Starting FastAPI application with Gunicorn + Uvicorn workers...' &&
-        gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 120 --keep-alive 5 --access-logfile - --error-logfile -
+        gunicorn app.main:app -w 2 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 120 --keep-alive 5 --access-logfile - --error-logfile -
       "
     ports:
       - "${APP_PORT:-8000}:8000"
@@ -144,10 +130,10 @@ services:
       KESTRA_CONFIGURATION: |
         datasources:
           postgres:
-            url: jdbc:postgresql://postgres_kestra:5432/${KESTRA_POSTGRES_DB:-kestra}
+            url: jdbc:postgresql://postgres:5432/${KESTRA_POSTGRES_DB:-kestra}
             driverClassName: org.postgresql.Driver
-            username: ${KESTRA_POSTGRES_USER:-kestra}
-            password: ${KESTRA_POSTGRES_PASSWORD}
+            username: ${POSTGRES_USER:-kestra}
+            password: ${POSTGRES_PASSWORD}
         kestra:
           server:
             basicAuth:
@@ -170,12 +156,10 @@ services:
       - "${KESTRA_PORT:-8080}:8080"
       - "${KESTRA_MANAGEMENT_PORT:-8081}:8081"
     depends_on:
-      postgres_kestra:
+      postgres:
         condition: service_started
 
 volumes:
-  postgres-data:
-    driver: local
   kestra-data:
     driver: local
   redis_data:

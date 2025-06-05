@@ -36,18 +36,33 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        - TARGETPLATFORM=linux/amd64
-        - BUILDPLATFORM=linux/amd64
-    volumes:
-      - .:/app
+    container_name: noit_fastapi_app
+    command: >
+      bash -c "
+        echo '🚀 Starting FastAPI application with Gunicorn + Uvicorn workers...' &&
+        gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 120 --keep-alive 5 --access-logfile - --error-logfile -
+      "
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - TASKIQ_ADMIN_URL=http://taskiq-admin:3000
+      - TASKIQ_ADMIN_API_TOKEN=${TASKIQ_ADMIN_API_TOKEN}
+      - TASKIQ_BROKER_NAME=noit_backend_app
     env_file:
       - .env
     depends_on:
-      - postgres
       - redis
-    ports:
-      - "8000:8000"
+      - taskiq-admin
+    volumes:
+      - .:/app
+    working_dir: /app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Taskiq Worker
   taskiq-worker:

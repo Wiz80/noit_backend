@@ -127,8 +127,8 @@ class WebhookController:
                         analyzer = EnhancedBusinessAnalyzer(
                             business_model=business_model,
                             lang=research.language or "es",
-                            validator_provider="deepseek",  # Valores predeterminados
-                            validator_model="deepseek-reasoner",
+                            validator_provider="anthropic",  # Valores predeterminados
+                            validator_model="claude-3-5-sonnet-20241022",
                             max_depth=1,
                             research_model=research.model or "sonar-deep-research",
                             db=db_session

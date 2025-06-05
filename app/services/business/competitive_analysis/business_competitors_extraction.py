@@ -151,7 +151,8 @@ class EnhancedBusinessAnalyzer:
                 self.llm = create_llm_client(
                     provider="anthropic",
                     model="claude-3-5-sonnet-20241022",
-                    temperature=0.3
+                    temperature=0.3,
+                    max_tokens=20000
                 )
                 logging.info("Fallback to default Claude model successful")
             except Exception as fallback_error:

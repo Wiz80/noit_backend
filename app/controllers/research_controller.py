@@ -12,6 +12,7 @@ from app.services.storage.minio_service import MinioService
 from app.api import deps
 from app.controllers.business_understanding.state_of_art import StateOfArtController
 
+from app.core.config import settings
 load_dotenv()
 
 # Configure logging

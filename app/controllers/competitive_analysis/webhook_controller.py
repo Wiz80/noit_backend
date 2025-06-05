@@ -12,7 +12,7 @@ from app.models.business.business_understanding.business_model import BusinessMo
 from app.services.business.competitive_analysis.business_competitors_extraction import EnhancedBusinessAnalyzer, BusinessModel
 from app.services.storage.minio_service import MinioService
 import app.prompts.business.prompts_business_competitors as prompts
-from app.utils.decode_json import clean_json_encoding
+from app.utils.decode_json import clean_json_encoding, extract_and_parse_json
 
 # Import settings
 from app.core.config import settings
@@ -143,24 +143,48 @@ class WebhookController:
                             logger.info("Procesando datos raw de competidores...")
                             raw_response = competitors_data
                             
-                            # Usar el mismo flujo que en research_competitors
-                            try:
-                                # Parse response with LLM to structured JSON
-                                logger.info("Parseando respuesta de investigación con LLM...")
-                                prompt_parsing = prompts.create_parsing_prompt_competitors(
-                                    lang=research.language or "es",
-                                    raw_response=raw_response
-                                )
+                            # OPTIMIZACIÓN: Intentar primero parsing automático antes del LLM
+                            logger.info("Intentando extracción automática de JSON...")
+                            parsed_data, needs_llm = extract_and_parse_json(raw_response)
+                            
+                            if not needs_llm and parsed_data:
+                                # Extraer competidores del JSON parseado automáticamente
+                                if 'competitors_analysis' in parsed_data and 'competitors' in parsed_data['competitors_analysis']:
+                                    competitors_structured = parsed_data['competitors_analysis']['competitors']
+                                elif 'competitors' in parsed_data:
+                                    competitors_structured = parsed_data['competitors']
+                                else:
+                                    # Si no tiene la estructura esperada, intentar extraer de cualquier lista
+                                    competitors_structured = []
+                                    for key, value in parsed_data.items():
+                                        if isinstance(value, list) and len(value) > 0:
+                                            # Verificar si los elementos de la lista parecen competidores
+                                            first_item = value[0]
+                                            if isinstance(first_item, dict) and any(k in first_item for k in ['name', 'website', 'similarity_score']):
+                                                competitors_structured = value
+                                                break
                                 
-                                # Parsear con LLM a JSON estructurado final
-                                competitors_parsed = await analyzer._parse_response_with_llm(prompt=prompt_parsing)
-                                logger.info(f"Datos parseados de competidores: {competitors_parsed}")
-                                
-                                competitors_structured = competitors_parsed.get('competitors', [])
-                                logger.info(f"Extraídos {len(competitors_structured)} competidores de datos raw")
-                            except Exception as e:
-                                logger.error(f"Error parseando competidores: {str(e)}")
-                                competitors_structured = []
+                                logger.info(f"JSON parseado automáticamente - extraídos {len(competitors_structured)} competidores")
+                            else:
+                                # Fallback al parsing con LLM si la extracción automática falló
+                                logger.info("Extracción automática falló, usando parsing con LLM...")
+                                try:
+                                    # Parse response with LLM to structured JSON
+                                    logger.info("Parseando respuesta de investigación con LLM...")
+                                    prompt_parsing = prompts.create_parsing_prompt_competitors(
+                                        lang=research.language or "es",
+                                        raw_response=raw_response
+                                    )
+                                    
+                                    # Parsear con LLM a JSON estructurado final
+                                    competitors_parsed = await analyzer._parse_response_with_llm(prompt=prompt_parsing)
+                                    logger.info(f"Datos parseados de competidores con LLM: {competitors_parsed}")
+                                    
+                                    competitors_structured = competitors_parsed.get('competitors', [])
+                                    logger.info(f"Extraídos {len(competitors_structured)} competidores de datos raw con LLM")
+                                except Exception as e:
+                                    logger.error(f"Error parseando competidores con LLM: {str(e)}")
+                                    competitors_structured = []
                         else:
                             # Si ya recibimos datos estructurados
                             competitors_structured = competitors_data

@@ -7,8 +7,9 @@ from app.services.storage.minio_service import MinioService
 from app.services.business.business_understanding.state_of_art import MarketStateOfArtService
 from app.models.business.business_understanding.state_of_art import ResearchTask, StatusEnum, ResearchTypeEnum, MarketStateOfArt
 
-#import aisuite
-import aisuite as ai
+# LangChain imports
+from langchain_core.messages import HumanMessage
+from app.services.llm import create_llm_client
 
 from datetime import datetime
 import json
@@ -18,7 +19,27 @@ logger = logging.getLogger(__name__)
 class StateOfArtController:
 
     def __init__(self):
-        self.llm = ai.Client()
+        # Initialize LLM using LangChain with Claude as default
+        try:
+            self.llm = create_llm_client(
+                provider="anthropic",
+                model="claude-3-5-sonnet-20241022",
+                temperature=0.3
+            )
+            logger.info("✅ LLM initialized with Claude")
+        except Exception as e:
+            logger.error(f"❌ Error initializing LLM: {e}")
+            # Try fallback to OpenAI
+            try:
+                self.llm = create_llm_client(
+                    provider="openai",
+                    model="gpt-4o",
+                    temperature=0.3
+                )
+                logger.info("⚠️ Fallback to OpenAI GPT-4o")
+            except Exception as fallback_error:
+                logger.error(f"❌ Could not initialize any LLM: {fallback_error}")
+                raise ValueError(f"Could not initialize any LLM: {fallback_error}")
 
     async def process_state_of_art_research(
         self,
@@ -243,35 +264,31 @@ class StateOfArtController:
             task_questions_text = json.dumps(task_questions) if task_questions else "No specific task questions provided"
             
             # Call LLM to match research text with questions
-            response = self.llm.chat.completions.create(
-                model="openai:gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"""
-                    Questions structure: {json.dumps(questions, ensure_ascii=False)}
-                    
-                    Task specific questions: {task_questions_text}
-                    
-                    Research text: 
-                    {research_text}
-                    
-                    Format the research answers according to the question structure, maintaining the exact same structure
-                    but adding answers to each question. Return a valid JSON object.
-                    """}
-                ],
-                response_format={"type": "json_object"}
-            )
+            user_prompt = f"""
+            Questions structure: {json.dumps(questions, ensure_ascii=False)}
             
-            # Parse the response if it's a string
-            if isinstance(response, str):
-                try:
-                    return json.loads(response)
-                except json.JSONDecodeError:
-                    logger.error("Error parsing LLM response as JSON")
-                    return {"error": "Failed to parse LLM response", "raw_response": response}
+            Task specific questions: {task_questions_text}
             
-            # Extract the content from the response object
-            return json.loads(response.choices[0].message.content)
+            Research text: 
+            {research_text}
+            
+            Format the research answers according to the question structure, maintaining the exact same structure
+            but adding answers to each question. Return a valid JSON object.
+            """
+            
+            # Create messages for LangChain
+            system_message = HumanMessage(content=system_prompt)
+            user_message = HumanMessage(content=user_prompt)
+            
+            # Use LangChain for LLM call
+            response = self.llm.invoke([system_message, user_message])
+            
+            # Parse the response
+            try:
+                return json.loads(response.content)
+            except json.JSONDecodeError:
+                logger.error("Error parsing LLM response as JSON")
+                return {"error": "Failed to parse LLM response", "raw_response": response.content}
             
         except Exception as e:
             logger.error(f"Error formatting research answers: {str(e)}", exc_info=True)

@@ -4,11 +4,13 @@ import re
 import logging
 from typing import Dict, List, Optional
 from pathlib import Path
-import aisuite as ai
-from openai import OpenAI
 from dotenv import load_dotenv
 from src.utils.load_data import load_competitor_data, load_competitor_questions
 from src.core.minio_manager import MinioManager
+
+# LangChain imports
+from langchain_core.messages import HumanMessage
+from app.services.llm import create_llm_client
 
 # Configure environment and logging
 load_dotenv()
@@ -23,19 +25,37 @@ class CompetitorAnalyzer:
         questions (List[str]): List of business questions to answer
         llm_provider (Dict): Configuration for different LLM providers
         results_dir (Path): Directory to store analysis results
-        deepseek_client: DeepSeek API client
+        llm: LangChain LLM client
     """
     
-    def __init__(self, questions: List[str], results_dir: str = "analysis_results", llm_provider: str = "deepseek", llm_model:str = "openai:gpt-4o"):
+    def __init__(self, questions: List[str], results_dir: str = "analysis_results", llm_provider: str = "anthropic", llm_model: str = "claude-3-5-sonnet-20241022"):
         self.questions = questions
         self.results_dir = Path(results_dir)
-        if llm_provider == "openai" or llm_provider == "claude":
-            self.llm = ai.Client()
-        elif llm_provider == "deepseek":
-            self.llm = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"),
-                              base_url="https://api.deepseek.com")
-            
+        self.llm_provider = llm_provider
         self.llm_model = llm_model
+        
+        # Initialize LLM using LangChain
+        try:
+            self.llm = create_llm_client(
+                provider=llm_provider,
+                model=llm_model,
+                temperature=0.3
+            )
+            logger.info(f"LLM initialized with provider: {llm_provider}, model: {llm_model}")
+        except Exception as e:
+            logger.error(f"Error initializing LLM: {str(e)}")
+            # Fallback to default anthropic model
+            try:
+                self.llm = create_llm_client(
+                    provider="anthropic",
+                    model="claude-3-5-sonnet-20241022",
+                    temperature=0.3
+                )
+                logger.info("Fallback to default Claude model successful")
+            except Exception as fallback_error:
+                logger.error(f"Fallback failed: {str(fallback_error)}")
+                raise ValueError(f"Could not initialize any LLM: {fallback_error}")
+                
         # Create results directory if needed
         self.minio_manager = MinioManager(bucket_name="web-scraper-cache")
 
@@ -98,19 +118,18 @@ class CompetitorAnalyzer:
         Execute LLM call with proper error handling.
         
         Args:
-            provider: LLM provider (openai|claude|deepseek)
+            provider: LLM provider (anthropic|openai|deepseek)
             prompt: Analysis prompt
             
         Returns:
             Parsed JSON response or None
         """
         try:
-            response = self.llm.chat.completions.create(
-                model=self.llm_model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3
-            )
-            raw_content = response.choices[0].message.content
+            # Use LangChain for LLM call
+            message = HumanMessage(content=prompt)
+            response = self.llm.invoke([message])
+            raw_content = response.content
+            
             cleaned_content = re.sub(r'^\s*```json\s*|\s*```\s*$', '', raw_content, flags=re.DOTALL)
             try:
                 parsed_data = json.loads(cleaned_content)
@@ -158,7 +177,7 @@ class CompetitorAnalyzer:
     def analyze_competitor(
         self,
         competitor_name: str,
-        provider: str = 'deepseek'
+        provider: str = 'anthropic'
     ) -> Dict:
         """
         Analyze all scraped files for a competitor.
@@ -207,7 +226,7 @@ class CompetitorAnalyzer:
     def batch_analyze(
         self,
         competitors: List[str],
-        provider: str = 'deepseek'
+        provider: str = 'anthropic'
     ) -> Dict[str, Dict]:
         """
         Analyze multiple competitors.
@@ -235,12 +254,12 @@ if __name__ == "__main__":
     questions = load_competitor_questions()
     competitors = load_competitor_data()
 
-    provider = 'openai'
-    llm_model = 'openai:gpt-4o-mini'
+    provider = 'anthropic'
+    llm_model = 'claude-3-5-sonnet-20241022'
     # Initialize analyzer
-    analyzer = CompetitorAnalyzer(questions, llm_provider=provider)
+    analyzer = CompetitorAnalyzer(questions, llm_provider=provider, llm_model=llm_model)
     
-    # Run analysis using DeepSeek as default
+    # Run analysis using Claude as default
     results = analyzer.batch_analyze(competitors, provider=provider)
     
     # Save final results

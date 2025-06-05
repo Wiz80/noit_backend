@@ -2,14 +2,16 @@ import os
 import json
 import tiktoken
 from collections import defaultdict
-from openai import OpenAI
 from app.services.storage.minio_service import MinioService
 from apify_client import ApifyClient
 from app.models.business.competitive_analysis.instagram import InstagramUserInfo, InstagramPostInfo, InstagramComment, InstagramCommentCategory
 from app.db.session import SessionLocal
-import aisuite as ai
 from dotenv import load_dotenv
 from app.services.business.competitive_analysis.instagram.base_instagram_module import BaseInstagramAnalyzer
+
+# LangChain imports
+from langchain_core.messages import HumanMessage
+from app.services.llm import create_llm_client
 
 load_dotenv()
 
@@ -17,7 +19,7 @@ load_dotenv()
 session = SessionLocal()
 
 class InstagramCommentCategorizer(BaseInstagramAnalyzer):
-    def __init__(self, username, output_folder, provider, model):
+    def __init__(self, username, output_folder, provider="anthropic", model="claude-3-5-sonnet-20241022"):
         super().__init__(username, output_folder)
         self.tokenizer = tiktoken.get_encoding("cl100k_base")
         self.provider = provider
@@ -25,17 +27,27 @@ class InstagramCommentCategorizer(BaseInstagramAnalyzer):
         self._init_clients()
             
     def _init_clients(self):
-        """Initialize LLM clients"""
-        if self.provider in ["openai", "claude"]:
-            self.client = ai.Client()
-        elif self.provider == "deepseek":
-            self.client = OpenAI(
-                api_key=os.getenv("DEEPSEEK_API_KEY"),
-                base_url="https://api.deepseek.com"
+        """Initialize LLM clients using LangChain"""
+        try:
+            self.client = create_llm_client(
+                provider=self.provider,
+                model=self.model,
+                temperature=0.3
             )
-        else:
-            raise ValueError("Invalid validator model specified")
-
+            print(f"✅ LLM initialized with provider: {self.provider}, model: {self.model}")
+        except Exception as e:
+            print(f"❌ Error initializing LLM: {e}")
+            # Fallback to default anthropic model
+            try:
+                self.client = create_llm_client(
+                    provider="anthropic",
+                    model="claude-3-5-sonnet-20241022",
+                    temperature=0.3
+                )
+                print(f"⚠️ Fallback to default Claude model")
+            except Exception as fallback_error:
+                print(f"❌ Could not initialize any LLM: {fallback_error}")
+                raise ValueError(f"Could not initialize any LLM: {fallback_error}")
 
     def count_tokens(self, text):
         """Counts the number of tokens in a given text using OpenAI's tokenizer."""
@@ -241,17 +253,19 @@ El JSON debe tener formato de diccionario con claves para las categorías y valo
             prompt_messages.append({"role": "user", "content": user_message})
             
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=prompt_messages,
-                    temperature=0.7,  # Aumentar para fomentar categorías más creativas
-                    max_tokens=2000
-                )
-                if not response or not response.choices:
+                # Create messages for LangChain
+                messages = []
+                for prompt in prompt_messages:
+                    messages.append(HumanMessage(content=prompt["content"]))
+                
+                # Use LangChain for LLM call
+                response = self.client.invoke(messages)
+                
+                if not response or not response.content:
                     print("⚠️ Respuesta vacía de LLM.")
                     continue
 
-                response_content = response.choices[0].message.content.strip()
+                response_content = response.content.strip()
                 if not response_content:
                     print("⚠️ LLM retornó una respuesta vacía.")
                     continue

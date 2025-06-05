@@ -11,10 +11,13 @@ import nltk
 import numpy as np
 from app.services.storage.minio_service import MinioService
 from app.db.session import SessionLocal
-import aisuite as ai
 from io import BytesIO
 from app.services.business.competitive_analysis.instagram.base_instagram_module import BaseInstagramAnalyzer
 from app.models.business.competitive_analysis.instagram import InstagramUserInfo, InstagramLDATopic
+
+# LangChain imports
+from langchain_core.messages import HumanMessage
+from app.services.llm import create_llm_client
 
 # Initialize database session
 session = SessionLocal()
@@ -46,8 +49,30 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
         
         nltk.download('punkt')
         nltk.download('stopwords')
-        self.client = ai.Client()
-        self.model = "openai:gpt-4o-mini"  # Model to use for analysis
+        
+        # Initialize LLM using LangChain with Claude as default
+        try:
+            self.client = create_llm_client(
+                provider="anthropic",
+                model="claude-3-5-sonnet-20241022",
+                temperature=0.3
+            )
+            print(f"✅ LLM initialized with Claude")
+        except Exception as e:
+            print(f"❌ Error initializing LLM: {e}")
+            # Try fallback to OpenAI
+            try:
+                self.client = create_llm_client(
+                    provider="openai",
+                    model="gpt-4o-mini",
+                    temperature=0.3
+                )
+                print(f"⚠️ Fallback to OpenAI GPT-4o-mini")
+            except Exception as fallback_error:
+                print(f"❌ Could not initialize any LLM: {fallback_error}")
+                raise ValueError(f"Could not initialize any LLM: {fallback_error}")
+        
+        self.model = "claude-3-5-sonnet-20241022"  # Model to use for analysis
 
     async def load_comments(self):
         """
@@ -310,22 +335,18 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
             )
             
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": "Eres un experto en análisis de datos y marketing digital que siempre responde con JSON válido."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.3,
-                    max_tokens=1500,
-                    response_format={"type": "json_object"}  # Force JSON response format
-                )
+                # Create messages for LangChain
+                system_message = HumanMessage(content="Eres un experto en análisis de datos y marketing digital que siempre responde con JSON válido.")
+                user_message = HumanMessage(content=prompt)
                 
-                if not response or not response.choices:
-                    print("⚠️ No se obtuvo respuesta de OpenAI.")
+                # Use LangChain for LLM call
+                response = self.client.invoke([system_message, user_message])
+                
+                if not response or not response.content:
+                    print("⚠️ No se obtuvo respuesta del LLM.")
                     return {}
                 
-                final_response = response.choices[0].message.content.strip()
+                final_response = response.content.strip()
                 print(f"🔍 Respuesta del LLM (primeros 100 caracteres): {final_response[:100]}...")
                 
                 # Clean the response to ensure valid JSON

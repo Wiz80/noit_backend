@@ -3,9 +3,7 @@ import logging
 import asyncio
 import os
 from typing import Dict, List, Any, Optional
-import aisuite as ai
 from app.models.business.business_understanding.business_model import BusinessModel
-from openai import OpenAI
 from app.services.storage.minio_service import MinioService
 import app.prompts.business.prompts_state_of_art as prompts
 from app.services.search.dynamic_research_ai import ResearchModule, ResearchConfig
@@ -14,6 +12,10 @@ from app.models.business.business_understanding.business_model import BusinessMo
 from app.models.business.business_understanding.state_of_art import MarketStateOfArt, StatusEnum, ResearchTask, ResearchTypeEnum
 from sqlalchemy.orm import Session
 from datetime import datetime
+
+# LangChain imports
+from langchain_core.messages import HumanMessage
+from app.services.llm import create_llm_client
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -26,8 +28,8 @@ class MarketStateOfArtService:
         self, 
         db_session: Session, 
         minio_client: MinioService,
-        llm_provider: str = "openai",
-        llm_model: str = "openai:gpt-4o",
+        llm_provider: str = "anthropic",
+        llm_model: str = "claude-3-5-sonnet-20241022",
         language: str = "en",
         max_iterations: int = 1,
         temperature: float = 0.7,
@@ -42,11 +44,27 @@ class MarketStateOfArtService:
         self.model = model
         self.base_url = base_url
         
-        if llm_provider == "openai" or llm_provider == "claude":
-            self.llm = ai.Client()
-        elif llm_provider == "deepseek":
-            self.llm = OpenAI(api_key=os.getenv("DEEPSEEK_API_KEY"),
-                              base_url="https://api.deepseek.com")
+        # Initialize LLM using LangChain
+        try:
+            self.llm = create_llm_client(
+                provider=llm_provider,
+                model=llm_model,
+                temperature=temperature
+            )
+            logger.info(f"LLM initialized with provider: {llm_provider}, model: {llm_model}")
+        except Exception as e:
+            logger.error(f"Error initializing LLM: {str(e)}")
+            # Fallback to default anthropic model
+            try:
+                self.llm = create_llm_client(
+                    provider="anthropic",
+                    model="claude-3-5-sonnet-20241022",
+                    temperature=temperature
+                )
+                logger.info("Fallback to default Claude model successful")
+            except Exception as fallback_error:
+                logger.error(f"Fallback failed: {str(fallback_error)}")
+                raise ValueError(f"Could not initialize any LLM: {fallback_error}")
             
         self.llm_model = llm_model
         
@@ -198,18 +216,17 @@ class MarketStateOfArtService:
                 logger.info(f"Using language: {self.language} for market research prompt")
                 
                 logger.info(f"Calling LLM with model: {self.llm_model} to generate market research questions")
-                response = self.llm.chat.completions.create(
-                    model=self.llm_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": content}
-                    ],
-                    temperature=0.3
-                )
+                
+                # Create messages for LangChain
+                system_message = HumanMessage(content=system_prompt)
+                user_message = HumanMessage(content=content)
+                
+                # Use LangChain for LLM call
+                response = self.llm.invoke([system_message, user_message])
                 
                 logger.info("LLM response received for market research questions")
                 # Intentamos parsear el JSON de la respuesta
-                response_text = response.choices[0].message.content.strip()
+                response_text = response.content.strip()
                 
                 # Limpiar posibles marcadores de código
                 if response_text.startswith("```json"):
@@ -414,18 +431,17 @@ class MarketStateOfArtService:
                 logger.info(f"Using language: {self.language} for state of art prompt")
                 
                 logger.info(f"Calling LLM with model: {self.llm_model} to generate state of art questions")
-                response = self.llm.chat.completions.create(
-                    model=self.llm_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": content}
-                    ],
-                    temperature=0.3
-                )
+                
+                # Create messages for LangChain
+                system_message = HumanMessage(content=system_prompt)
+                user_message = HumanMessage(content=content)
+                
+                # Use LangChain for LLM call
+                response = self.llm.invoke([system_message, user_message])
                 
                 logger.info("LLM response received for state of art questions")
                 # Intentamos parsear el JSON de la respuesta
-                response_text = response.choices[0].message.content.strip()
+                response_text = response.content.strip()
                 
                 # Limpiar posibles marcadores de código
                 if response_text.startswith("```json"):

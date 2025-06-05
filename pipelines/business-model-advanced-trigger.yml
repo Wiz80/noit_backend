@@ -23,7 +23,7 @@ tasks:
 
   - id: validate_business_exists
     type: io.kestra.plugin.jdbc.postgresql.Query
-    url: "jdbc:postgresql://44.204.96.182:5432/business_ai"
+    url: "jdbc:postgresql://postgres:5432/business_ai"
     username: "noit-user-dev"
     password: "password"
     sql: |
@@ -61,7 +61,7 @@ tasks:
 
   - id: trigger_competitor_analysis
     type: io.kestra.plugin.core.http.Request
-    uri: "http://host.docker.internal:8000/api/v1/analyze-competitors/{{ inputs.business_id }}"
+    uri: "http://app:8000/api/v1/analyze-competitors/{{ inputs.business_id }}"
     method: "POST"
     contentType: "application/json"
     headers:
@@ -74,10 +74,10 @@ tasks:
         "validator_provider": "openai",
         "validator_model": "openai:gpt-4o-mini",
         "research_model": "sonar-deep-research",
-        "base_url": "http://host.docker.internal:8000",
+        "base_url": "https://noit.com.co",
         "triggered_by": "{{ inputs.triggered_by }}"
       }
-    timeout: "PT30S"
+    timeout: "PT5M"
 
   - id: process_analysis_response
     type: io.kestra.plugin.scripts.python.Script

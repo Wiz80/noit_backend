@@ -32,7 +32,7 @@ class WebsiteExtractionController:
         # Inicializar Website Social Media Scraper
         self.website_social_scraper = WebsiteSocialMediaScraper(
             llm_provider="openai",
-            llm_model="gpt-3.5-turbo",
+            llm_model="gpt-4o-mini",
             api_key=os.getenv("OPENAI_API_KEY"),
             headless=False,
             verbose=True

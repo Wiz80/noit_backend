@@ -8,8 +8,6 @@ import uuid
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Optional, Set, Tuple, Callable, Any
 from dotenv import load_dotenv
-import aisuite as ai
-from openai import OpenAI
 from app.services.search.dynamic_research_ai import ResearchConfig, ResearchModule
 from app.models.business.competitive_analysis.competitors import Competitor
 import app.prompts.business.prompts_business_competitors as prompts
@@ -19,34 +17,14 @@ import re
 from functools import lru_cache
 import threading
 
+# LangChain imports
+from langchain_core.messages import HumanMessage
+from app.services.llm import create_llm_client, read_api_key_from_env_file
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 load_dotenv()
-
-# Función auxiliar para leer la API key directamente del archivo .env
-def read_api_key_from_env_file(key_name):
-    """
-    Lee una API key directamente del archivo .env, ignorando las variables de entorno del sistema
-    
-    Args:
-        key_name: Nombre de la variable en el archivo .env
-        
-    Returns:
-        El valor de la variable si se encuentra, None en caso contrario
-    """
-    try:
-        with open('.env', 'r') as f:
-            for line in f:
-                if line.strip() and not line.startswith('#'):
-                    if '=' in line:
-                        k, v = line.strip().split('=', 1)
-                        if k == key_name:
-                            return v
-        return None
-    except Exception as e:
-        logger.error(f"Error leyendo el archivo .env: {str(e)}")
-        return None
 
 @dataclass
 class CompetitorInfo:
@@ -147,8 +125,8 @@ class EnhancedBusinessAnalyzer:
     
     def __init__(self, business_model: str, 
                        lang: str = 'es', 
-                       validator_provider: str = 'deepseek', 
-                       validator_model: str = "deepseek-reasoner",
+                       validator_provider: str = 'anthropic', 
+                       validator_model: str = "claude-3-5-sonnet-20241022",
                        max_depth: int = 3,
                        research_model: str = "sonar-deep-research",
                        db: sessionmaker = SessionLocal):
@@ -158,24 +136,29 @@ class EnhancedBusinessAnalyzer:
         self.validator_model = validator_model
         self.research_model = research_model
 
-        if validator_provider == "openai" or validator_provider == "claude":
-            self.llm = ai.Client()
-        elif validator_provider == "deepseek":
-            # Leer la API key directamente del archivo .env
-            deepseek_api_key = read_api_key_from_env_file("DEEPSEEK_API_KEY")
-            if not deepseek_api_key:
-                logging.error("DEEPSEEK_API_KEY no encontrada en el archivo .env")
-                raise ValueError("DEEPSEEK_API_KEY no configurada en el archivo .env")
-            
-            
-            # Usar la URL base correcta sin el /v1
-            self.llm = OpenAI(
-                api_key=deepseek_api_key,
-                base_url="https://api.deepseek.com"  # URL correcta sin /v1
+        # Initialize LLM using LangChain
+        try:
+            self.llm = create_llm_client(
+                provider=validator_provider,
+                model=validator_model,
+                temperature=0.3
             )
+            logging.info(f"LLM initialized with provider: {validator_provider}, model: {validator_model}")
+        except Exception as e:
+            logging.error(f"Error initializing LLM: {str(e)}")
+            # Fallback to default anthropic model
+            try:
+                self.llm = create_llm_client(
+                    provider="anthropic",
+                    model="claude-3-5-sonnet-20241022",
+                    temperature=0.3
+                )
+                logging.info("Fallback to default Claude model successful")
+            except Exception as fallback_error:
+                logging.error(f"Fallback failed: {str(fallback_error)}")
+                raise ValueError(f"Could not initialize any LLM: {fallback_error}")
             
         self.business_model = business_model
-
         self.max_depth = max_depth
 
         # Create a session from the session factory if it's a sessionmaker
@@ -249,26 +232,13 @@ class EnhancedBusinessAnalyzer:
         """
         
         try:
-            # Crear un cliente de Deepseek específicamente para esta función
-            # Asegurando que siempre se use deepseek-reasoner
-            deepseek_api_key = read_api_key_from_env_file("DEEPSEEK_API_KEY")
-            if not deepseek_api_key:
-                logging.error("DEEPSEEK_API_KEY no encontrada en el archivo .env para generar preguntas")
-                raise ValueError("DEEPSEEK_API_KEY no configurada en el archivo .env")
+            # Usar el LLM configurado (por defecto Claude)
+            logger.info(f"Generando preguntas con {self.validator_provider} usando modelo {self.validator_model}")
             
-            # Crear cliente específico para Deepseek
-            deepseek_client = OpenAI(
-                api_key=deepseek_api_key,
-                base_url="https://api.deepseek.com"
-            )
-            
-            logger.info("Generando preguntas con modelo deepseek-reasoner")
-            response = deepseek_client.chat.completions.create(
-                model="deepseek-reasoner",  # Usar siempre este modelo específico
-                messages=[{"role": "user", "content": structured_prompt}],
-                temperature=0.5
-            )
-            content = response.choices[0].message.content
+            # Crear mensaje usando LangChain
+            message = HumanMessage(content=structured_prompt)
+            response = self.llm.invoke([message])
+            content = response.content
                 
             # Procesar las preguntas sin llamadas adicionales a la API
             questions = self._process_questions_locally(content)
@@ -281,17 +251,14 @@ class EnhancedBusinessAnalyzer:
             return questions
             
         except Exception as e:
-            logger.error(f"Error generating competitor questions with Deepseek: {str(e)}")
-            # Intentar con fallback a otros modelos disponibles solo si falla Deepseek
+            logger.error(f"Error generating competitor questions with {self.validator_provider}: {str(e)}")
+            # Intentar con fallback usando el LLM configurado
             try:
                 if hasattr(self, 'llm') and self.llm:
-                    logger.info("Intentando generar preguntas con modelo alternativo configurado")
-                    response = self.llm.chat.completions.create(
-                        model=self.validator_model,
-                        messages=[{"role": "user", "content": structured_prompt}],
-                        temperature=0.5
-                    )
-                    content = response.choices[0].message.content
+                    logger.info("Intentando generar preguntas con fallback")
+                    message = HumanMessage(content=structured_prompt)
+                    response = self.llm.invoke([message])
+                    content = response.content
                     questions = self._process_questions_locally(content)
                     
                     if questions:
@@ -673,45 +640,12 @@ class EnhancedBusinessAnalyzer:
         try:
             logging.info(f"Enviando solicitud a {self.validator_provider} usando modelo {self.validator_model}")
             
-            # Configuración específica para cuando se usa DeepSeek
-            if self.validator_provider == "deepseek":
-                # DeepSeek puede requerir un formato específico para el modelo
-                model_name = self.validator_model
-                # Si el modelo no tiene el prefijo del proveedor, añadirlo
-                if not model_name.startswith("deepseek-"):
-                    logging.info(f"Usando modelo: {model_name}")
-                
-                # Intenta hacer la llamada a la API
-                try:
-                    response = self.llm.chat.completions.create(
-                        model=model_name,
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=0.3
-                    )
-                except Exception as api_error:
-                    # Registra el error detallado
-                    error_detail = str(api_error)
-                    logging.error(f"Error de API DeepSeek: {error_detail}")
-                    
-                    # Si es un problema de autenticación, dar indicaciones más claras
-                    if "401" in error_detail or "authentication" in error_detail.lower():
-                        logging.error("Error de autenticación con DeepSeek. Verifica tu API key y configuración de cuenta.")
-                    
-                    # Si es un problema con el modelo, sugerir alternativas
-                    if "model" in error_detail.lower() and "not found" in error_detail.lower():
-                        logging.error("El modelo especificado no fue encontrado. Prueba con 'deepseek-chat' o 'deepseek-coder'.")
-                    
-                    raise api_error
-            else:
-                # Para otros proveedores
-                response = self.llm.chat.completions.create(
-                    model=self.validator_model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3
-                )
-
+            # Usar LangChain para la llamada al LLM
+            message = HumanMessage(content=prompt)
+            response = self.llm.invoke([message])
+            
             # Procesar la respuesta
-            json_str = self._extract_json(response.choices[0].message.content)
+            json_str = self._extract_json(response.content)
             return json.loads(json_str)
             
         except json.JSONDecodeError as e:

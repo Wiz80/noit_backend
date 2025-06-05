@@ -1,41 +1,41 @@
-volumes:
-  postgres-data:
-    driver: local
-  redis_data:
-    driver: local
-  taskiq-admin-data:
-    driver: local
-
+version: '3.8'
 services:
-  redis:
-    image: redis:6.2-alpine
+  postgres:
+    image: postgres:14
     volumes:
-      - redis_data:/data
-    command: redis-server --save 60 1 --loglevel warning
-    restart: unless-stopped
-
-  # Nginx Proxy Reverso
-  nginx:
-    image: nginx:alpine
-    container_name: noit_nginx
+      - /data/postgres/pgdata:/var/lib/postgresql/data
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     ports:
-      - "80:80"
-      - "443:443"
+      - "5432:5432"
+    restart: always
+  
+  postgres_kestra:
+    image: postgres
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-      - /var/www/certbot:/var/www/certbot
-    depends_on:
-      - app
-    restart: unless-stopped
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${KESTRA_POSTGRES_DB:-kestra}
+      POSTGRES_USER: ${KESTRA_POSTGRES_USER:-kestra}
+      POSTGRES_PASSWORD: ${KESTRA_POSTGRES_PASSWORD}
     healthcheck:
-      test: ["CMD", "nginx", "-t"]
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 10
 
-  # FastAPI Application - Producción
+  redis:
+    image: redis:6.2-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning --requirepass ${REDIS_PASSWORD}
+  
   app:
     build:
       context: .
@@ -43,81 +43,138 @@ services:
     container_name: noit_fastapi_app
     command: >
       bash -c "
-        echo '🚀 Starting FastAPI production server with Gunicorn...' &&
-        gunicorn app.main:app 
-        -w 4 
-        -k uvicorn.workers.UvicornWorker 
-        --bind 0.0.0.0:8000 
-        --timeout 120 
-        --keep-alive 5 
-        --max-requests 1000 
-        --max-requests-jitter 100 
-        --preload 
-        --access-logfile - 
-        --error-logfile - 
-        --log-level info
+        echo '🚀 Starting FastAPI application with Gunicorn + Uvicorn workers...' &&
+        gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 120 --keep-alive 5 --access-logfile - --error-logfile -
       "
-    expose:
-      - "8000"
+    ports:
+      - "${APP_PORT:-8000}:8000"
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - TASKIQ_ADMIN_URL=http://taskiq-admin:3000
-      - TASKIQ_ADMIN_API_TOKEN=supersecret
-      - TASKIQ_BROKER_NAME=noit_backend_app_prod
-      - ENVIRONMENT=production
+      - TASKIQ_ADMIN_API_TOKEN=${TASKIQ_ADMIN_API_TOKEN}
+      - TASKIQ_BROKER_NAME=noit_backend_app
     env_file:
-      - .env.prod
+      - .env
     depends_on:
       - redis
       - taskiq-admin
+    volumes:
+      - .:/app
+    working_dir: /app
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
 
-  # Taskiq Worker - Producción
+  nginx:
+    image: nginx:1.21-alpine
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    depends_on:
+      - app
+    restart: always
+    command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
+  
+  # Taskiq Worker
   taskiq-worker:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: taskiq_worker_prod
+    container_name: taskiq_worker
     command: >
       bash -c "
-        echo '🚀 Starting Taskiq worker for production...' &&
+        echo '🚀 Starting Taskiq worker...' &&
         taskiq worker app.tasks.broker:broker 
-        --workers 4 
-        --max-async-tasks 20 
-        --fs-discover 
-        --log-level info
+        --workers 2 
+        --max-async-tasks 10 
+        --fs-discover
       "
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - TASKIQ_ADMIN_URL=http://taskiq-admin:3000
-      - TASKIQ_ADMIN_API_TOKEN=supersecret
-      - TASKIQ_BROKER_NAME=noit_backend_worker_prod
-      - ENVIRONMENT=production
+      - TASKIQ_ADMIN_API_TOKEN=${TASKIQ_ADMIN_API_TOKEN}
+      - TASKIQ_BROKER_NAME=noit_backend_worker
     env_file:
-      - .env.prod
+      - .env
     depends_on:
       - redis
       - taskiq-admin
+    volumes:
+      - .:/app
+    working_dir: /app
     restart: unless-stopped
-    deploy:
-      replicas: 2  # Múltiples instancias del worker
 
-  # Taskiq Admin Dashboard - Solo para monitoring en prod
+  # Taskiq Admin Dashboard
   taskiq-admin:
     image: ghcr.io/taskiq-python/taskiq-admin:latest
-    container_name: taskiq_admin_prod
-    expose:
-      - "3000"
+    container_name: taskiq_admin
+    ports:
+      - "${TASKIQ_ADMIN_PORT:-3000}:3000"
     environment:
-      - TASKIQ_ADMIN_API_TOKEN=supersecret
+      - TASKIQ_ADMIN_API_TOKEN=${TASKIQ_ADMIN_API_TOKEN}
     volumes:
       - taskiq-admin-data:/usr/database/
     depends_on:
       - redis
-    restart: unless-stopped 
+
+  kestra:
+    image: kestra/kestra:latest
+    pull_policy: always
+    # Note that this setup with a root user is intended for development purpose.
+    # Our base image runs without root, but the Docker Compose implementation needs root to access the Docker socket
+    user: "root"
+    command: server standalone
+    volumes:
+      - kestra-data:/app/storage
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/kestra-wd:/tmp/kestra-wd
+    environment:
+      KESTRA_CONFIGURATION: |
+        datasources:
+          postgres:
+            url: jdbc:postgresql://postgres_kestra:5432/${KESTRA_POSTGRES_DB:-kestra}
+            driverClassName: org.postgresql.Driver
+            username: ${KESTRA_POSTGRES_USER:-kestra}
+            password: ${KESTRA_POSTGRES_PASSWORD}
+        kestra:
+          server:
+            basicAuth:
+              enabled: ${KESTRA_BASIC_AUTH_ENABLED:-true}
+              username: "${KESTRA_ADMIN_EMAIL}"
+              password: ${KESTRA_ADMIN_PASSWORD}
+          repository:
+            type: postgres
+          storage:
+            type: local
+            local:
+              basePath: "/app/storage"
+          queue:
+            type: postgres
+          tasks:
+            tmpDir:
+              path: /tmp/kestra-wd/tmp
+          url: ${KESTRA_URL:-http://localhost:8080/}
+    ports:
+      - "${KESTRA_PORT:-8080}:8080"
+      - "${KESTRA_MANAGEMENT_PORT:-8081}:8081"
+    depends_on:
+      postgres_kestra:
+        condition: service_started
+
+volumes:
+  postgres-data:
+    driver: local
+  kestra-data:
+    driver: local
+  redis_data:
+    driver: local
+  taskiq-admin-data:
+    driver: local

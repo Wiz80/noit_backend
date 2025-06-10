@@ -672,27 +672,41 @@ class EnhancedBusinessAnalyzer:
         created_competitors = []
         
         for competitor_info in competitors_data['competitors']:
-            # Create Competitor object
-            competitor = Competitor(
-                business_idea_id=business_idea_id,
-                competitor_name=competitor_info["full_name"],
-                key_feature=competitor_info.get("key_feature", ""),
-                website=competitor_info.get("website", ""),
-                instagram_url=competitor_info.get("instagram_url", ""),
-                facebook_url=competitor_info.get("facebook_url", ""),
-                linkedin_url=competitor_info.get("linkedin_url", ""),
-                x_url=competitor_info.get("x_url", ""),
-                youtube_url=competitor_info.get("youtube_url", ""),
-                tiktok_url=competitor_info.get("tiktok_url", ""),
-                similarity_score=competitor_info.get("similarity_score", 0.0)
-            )
-            
-            # Add to session
-            self.db_session.add(competitor)
-            created_competitors.append(competitor)
+            try:
+                # Handle different possible field names for competitor name
+                competitor_name = competitor_info.get("competitor_name", "Unknown Competitor")
+                
+                # Create Competitor object
+                competitor = Competitor(
+                    business_idea_id=business_idea_id,
+                    competitor_name=competitor_name,
+                    key_feature=competitor_info.get("key_feature", ""),
+                    website=competitor_info.get("website", ""),
+                    instagram_url=competitor_info.get("instagram_url", ""),
+                    facebook_url=competitor_info.get("facebook_url", ""),
+                    linkedin_url=competitor_info.get("linkedin_url", ""),
+                    x_url=competitor_info.get("x_url", ""),
+                    youtube_url=competitor_info.get("youtube_url", ""),
+                    tiktok_url=competitor_info.get("tiktok_url", ""),
+                    similarity_score=competitor_info.get("similarity_score", 0.0)
+                )
+                
+                # Add to session
+                self.db_session.add(competitor)
+                created_competitors.append(competitor)
+                
+            except Exception as e:
+                logger.error(f"Error saving competitor {competitor_info}: {str(e)}")
+                # Continue with the next competitor instead of failing completely
+                continue
         
         # Commit to store competitors at the same time - remove await since this is a synchronous session
-        self.db_session.commit()
+        try:
+            self.db_session.commit()
+        except Exception as e:
+            logger.error(f"Error committing competitors to database: {str(e)}")
+            self.db_session.rollback()
+            raise
         
         return created_competitors
 

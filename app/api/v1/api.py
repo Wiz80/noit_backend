@@ -71,6 +71,6 @@ api_router.include_router(
 
 api_router.include_router(
     social_media.router,
-    prefix="/extract-social-media",
+    prefix="/analyze-competitors/extract-social-media",
     tags=["extract-social-media"]
 )

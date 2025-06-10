@@ -197,14 +197,8 @@ async def run_instagram_full_analysis_task(
             error=str(e)
         )
         
-        return {
-            "status": "failed",
-            "error": str(e),
-            "business_id": business_id,
-            "task_id": task_id,
-            "completed_at": datetime.now().isoformat(),
-            "task_type": "instagram_analysis"
-        }
+        # Re-raise the exception to ensure the task is marked as failed in TaskIQ
+        raise
     finally:
         if db:
             db.close()
@@ -238,10 +232,7 @@ async def complete_instagram_comments_analysis_task(
     """
     logger.info(f"🔍 Starting complete comments analysis task for username {username}, business {business_id}, task {task_id}")
     
-    # Get progress service
     progress_service = get_task_progress_service()
-    
-    # Mark task as processing
     progress_service.set_task_progress(
         task_id=task_id,
         progress=10,
@@ -249,46 +240,21 @@ async def complete_instagram_comments_analysis_task(
     )
     
     db = None
+    analysis_results = {} # Define analysis_results here to be available in except block
     try:
-        # Create database session
         db = SessionLocal()
         
-        # Verify if business_id exists
         business = db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first()
         if not business:
-            error_msg = "Business idea not found"
-            logger.error(f"❌ {error_msg} for business {business_id}")
-            progress_service.set_task_failed(task_id, error_msg)
-            return {
-                "status": "failed",
-                "error": error_msg,
-                "business_id": business_id,
-                "username": username,
-                "task_id": task_id,
-                "completed_at": datetime.now().isoformat(),
-                "task_type": "instagram_comments_analysis"
-            }
+            raise Exception("Business idea not found")
         
-        # Check if username exists in the database
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
         if not instagram_user:
-            error_msg = f"Instagram user {username} not found. You may need to scrape this profile first."
-            logger.error(f"❌ {error_msg}")
-            progress_service.set_task_failed(task_id, error_msg)
-            return {
-                "status": "failed",
-                "error": error_msg,
-                "business_id": business_id,
-                "username": username,
-                "task_id": task_id,
-                "completed_at": datetime.now().isoformat(),
-                "task_type": "instagram_comments_analysis"
-            }
+            raise Exception(f"Instagram user {username} not found. You may need to scrape this profile first.")
         
         output_folder = f"{business_id}/competitor-analysis/instagram"
-        analysis_results = {}
         
-        # 1. Run comment categorization (33% progress)
+        # 1. Run comment categorization
         logger.info(f"📊 Running comment categorization for {username}")
         progress_service.set_task_progress(
             task_id=task_id,
@@ -296,7 +262,6 @@ async def complete_instagram_comments_analysis_task(
             status="processing",
             results={"current_step": "categorization", "username": username}
         )
-        
         try:
             comment_categorizer = InstagramCommentCategorizer(
                 username=username,
@@ -312,19 +277,16 @@ async def complete_instagram_comments_analysis_task(
             logger.info(f"✅ Comment categorization completed for {username}")
         except Exception as e:
             logger.error(f"❌ Error in categorization for {username}: {str(e)}")
-            analysis_results["categorization"] = {
-                "status": "failed",
-                "error": str(e)
-            }
+            analysis_results["categorization"] = {"status": "failed", "error": str(e)}
         
         progress_service.set_task_progress(
             task_id=task_id,
             progress=40,
             status="processing",
-            results={"current_step": "sentiment_analysis", "username": username, "categorization": analysis_results["categorization"]}
+            results={"current_step": "sentiment_analysis", "username": username, "categorization": analysis_results.get("categorization")}
         )
         
-        # 2. Run sentiment and emotion analysis (66% progress)
+        # 2. Run sentiment and emotion analysis
         logger.info(f"🎭 Running sentiment and emotion analysis for {username}")
         try:
             sentiment_analyzer = InstagramSentimentEmotionAnalyzer(
@@ -340,10 +302,7 @@ async def complete_instagram_comments_analysis_task(
             logger.info(f"✅ Sentiment and emotion analysis completed for {username}")
         except Exception as e:
             logger.error(f"❌ Error in sentiment analysis for {username}: {str(e)}")
-            analysis_results["sentiment_emotion"] = {
-                "status": "failed",
-                "error": str(e)
-            }
+            analysis_results["sentiment_emotion"] = {"status": "failed", "error": str(e)}
         
         progress_service.set_task_progress(
             task_id=task_id,
@@ -352,7 +311,7 @@ async def complete_instagram_comments_analysis_task(
             results={"current_step": "topic_modeling", "username": username, **analysis_results}
         )
         
-        # 3. Run topic modeling (100% progress)
+        # 3. Run topic modeling
         logger.info(f"🧭 Running topic modeling for {username}")
         try:
             topic_modeling = InstagramTopicModeling(
@@ -371,12 +330,16 @@ async def complete_instagram_comments_analysis_task(
             logger.info(f"✅ Topic modeling completed for {username}")
         except Exception as e:
             logger.error(f"❌ Error in topic modeling for {username}: {str(e)}")
-            analysis_results["topic_modeling"] = {
-                "status": "failed",
-                "error": str(e)
-            }
+            analysis_results["topic_modeling"] = {"status": "failed", "error": str(e)}
         
-        # Mark task as completed
+        # Check for any failures
+        failed_steps = {step: res["error"] for step, res in analysis_results.items() if res.get("status") == "failed"}
+        
+        if failed_steps:
+            error_summary = "; ".join([f"{step}: {err}" for step, err in failed_steps.items()])
+            error_message = f"One or more analysis steps failed for {username}. Errors: {error_summary}"
+            raise Exception(error_message)
+
         progress_service.set_task_completed(
             task_id=task_id,
             results={
@@ -404,22 +367,12 @@ async def complete_instagram_comments_analysis_task(
         
     except Exception as e:
         logger.error(f"❌ Complete comments analysis task failed for username {username}, business {business_id}, task {task_id}: {str(e)}")
-        
-        # Mark task as failed
         progress_service.set_task_failed(
             task_id=task_id,
-            error=str(e)
+            error=str(e),
+            results=analysis_results
         )
-        
-        return {
-            "status": "failed",
-            "error": str(e),
-            "business_id": business_id,
-            "username": username,
-            "task_id": task_id,
-            "completed_at": datetime.now().isoformat(),
-            "task_type": "instagram_comments_analysis"
-        }
+        raise
     finally:
         if db:
             db.close()
@@ -700,15 +653,8 @@ async def complete_instagram_image_analysis_task(
             error=str(e)
         )
         
-        return {
-            "status": "failed",
-            "error": str(e),
-            "business_id": business_id,
-            "username": username,
-            "task_id": task_id,
-            "completed_at": datetime.now().isoformat(),
-            "task_type": "instagram_image_analysis"
-        }
+        # Re-raise the exception to ensure the task is marked as failed in TaskIQ
+        raise
     finally:
         if db:
             db.close()
@@ -1002,15 +948,8 @@ async def complete_instagram_statistics_analysis_task(
             error=str(e)
         )
         
-        return {
-            "status": "failed",
-            "error": str(e),
-            "business_id": business_id,
-            "username": username,
-            "task_id": task_id,
-            "completed_at": datetime.now().isoformat(),
-            "task_type": "instagram_statistics_analysis"
-        }
+        # Re-raise the exception to ensure the task is marked as failed in TaskIQ
+        raise
     finally:
         if db:
             db.close() 

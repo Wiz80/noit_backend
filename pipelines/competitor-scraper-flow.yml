@@ -59,6 +59,17 @@ tasks:
       AND LENGTH(TRIM(bm.customer_persona)) > 0
     store: true
 
+  - id: get_auth_token
+    type: io.kestra.plugin.core.http.Request
+    uri: "http://app:8000/api/v1/auth/login"
+    method: "POST"
+    contentType: "application/x-www-form-urlencoded"
+    body: "grant_type=&username={{ secret('SUPERUSER_EMAIL') }}&password={{ secret('SUPERUSER_PASSWORD') }}&scope=&client_id=&client_secret="
+    retry:
+      type: constant
+      maxAttempt: 3
+      interval: PT10S
+
   - id: trigger_competitor_analysis
     type: io.kestra.plugin.core.http.Request
     uri: "http://app:8000/api/v1/analyze-competitors/{{ inputs.business_id }}"
@@ -67,6 +78,7 @@ tasks:
     headers:
       Content-Type: "application/json"
       User-Agent: "Kestra-Webhook-Pipeline/1.0"
+      Authorization: "Bearer {{ json(outputs.get_auth_token.body).access_token }}"
     body: |
       {
         "business_id": "{{ inputs.business_id }}",
@@ -78,78 +90,6 @@ tasks:
         "triggered_by": "{{ inputs.triggered_by }}"
       }
     timeout: "PT5M"
-
-  - id: process_analysis_response
-    type: io.kestra.plugin.scripts.python.Script
-    containerImage: python:3.11-alpine
-    script: |
-      import json
-      
-      # Check the response from the competitor analysis trigger
-      trigger_response = {{ outputs.trigger_competitor_analysis }}
-      business_id = "{{ inputs.business_id }}"
-      
-      print(f"🔍 Analysis response for business {business_id}:")
-      print(f"Status Code: {trigger_response.get('code', 'Unknown')}")
-      
-      # Parse response body
-      body = trigger_response.get('body', {})
-      if isinstance(body, str):
-          try:
-              body = json.loads(body)
-          except:
-              print("Could not parse response body as JSON")
-              body = {}
-      
-      print(f"Response Body: {json.dumps(body, indent=2)}")
-      
-      # Check if successful
-      status_code = trigger_response.get('code', 500)
-      if status_code in [200, 202]:
-          print("✅ Competitor analysis successfully triggered")
-          
-          request_id = body.get('request_id', 'Unknown') if isinstance(body, dict) else 'Unknown'
-          print(f"📋 Request ID: {request_id}")
-          
-          # Store success info
-          with open('/tmp/analysis_result.json', 'w') as f:
-              json.dump({
-                  "success": True,
-                  "business_id": business_id,
-                  "request_id": request_id,
-                  "status_code": status_code,
-                  "message": body.get('message', 'Analysis started') if isinstance(body, dict) else 'Analysis started'
-              }, f, indent=2)
-          
-      else:
-          print(f"❌ Failed to trigger competitor analysis")
-          print(f"Error details: {body}")
-          
-          # Store error info but don't fail the workflow
-          with open('/tmp/analysis_result.json', 'w') as f:
-              json.dump({
-                  "success": False,
-                  "business_id": business_id,
-                  "status_code": status_code,
-                  "error": body,
-                  "message": "Failed to trigger analysis"
-              }, f, indent=2)
-    outputFiles:
-      - "/tmp/analysis_result.json"
-
-  - id: log_completion
-    type: io.kestra.plugin.core.log.Log
-    message: |
-      🎯 Webhook processing completed for business: {{ inputs.business_id }}
-      
-      Analysis Result: {{ json(outputs.process_analysis_response.outputFiles['/tmp/analysis_result.json']).success ? '✅ SUCCESS' : '❌ FAILED' }}
-      
-      Request ID: {{ json(outputs.process_analysis_response.outputFiles['/tmp/analysis_result.json']).request_id ?? 'N/A' }}
-      
-      Business Details:
-      - Title: {{ inputs.business_title ?? 'Unknown' }}
-      - Industry: {{ inputs.industry ?? 'Unknown' }}
-      - Triggered by: {{ inputs.triggered_by }}
 
 triggers:
   - id: business_model_webhook

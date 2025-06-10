@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from uuid import UUID
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Response
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -18,6 +19,7 @@ from app.services.business.competitive_analysis.instagram.comments.instagram_com
 from app.services.business.competitive_analysis.instagram.comments.instagram_sentiment_emotion_analyzer import InstagramSentimentEmotionAnalyzer
 from app.services.business.competitive_analysis.instagram.comments.instagram_topic_modeling import InstagramTopicModeling
 from app.services.storage.minio_service import MinioService
+from app.models.user import User
 
 # Import TaskIQ task
 from app.tasks.instagram_analysis_tasks import complete_instagram_comments_analysis_task
@@ -315,18 +317,20 @@ async def model_comment_topics(
 async def complete_comments_analysis(
     business_id: UUID,
     request: CompleteCommentsAnalysisRequest,
-    background_tasks: BackgroundTasks = None,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
 ):
     """
     Run a complete analysis on Instagram comments for a specific username using TaskIQ,
     including categorization, sentiment analysis, and topic modeling.
+
+    This endpoint checks for existing tasks to avoid redundant processing.
     
     Args:
         business_id: UUID of the business idea
         request: CompleteCommentsAnalysisRequest with all parameters
-        background_tasks: Background tasks runner (deprecated, using TaskIQ)
         db: Database session
+        current_user: Current active superuser
         
     Returns:
         dict: Analysis initiation status with task_id for progress tracking
@@ -334,12 +338,6 @@ async def complete_comments_analysis(
     try:
         # Extract parameters from request
         username = request.username
-        num_topics = request.num_topics
-        max_comments = request.max_comments
-        provider = request.provider
-        model = request.model
-        lang = request.lang
-        run_in_background = request.run_in_background
         
         # Verify if business_id exists
         business = db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first()
@@ -351,11 +349,41 @@ async def complete_comments_analysis(
         if not instagram_user:
             raise HTTPException(status_code=404, detail=f"Instagram user {username} not found. You may need to scrape this profile first.")
         
-        # Generate a unique task ID
-        task_id = str(uuid.uuid4())
-        
         # Get progress service
         progress_service = get_task_progress_service()
+        
+        # --- Task Existence Check ---
+        # Define a key to track the latest task for this specific analysis
+        task_tracking_key = f"latest_task:instagram_comments:{business_id}:{username}"
+        latest_task_id = progress_service.redis.get(task_tracking_key)
+        
+        if latest_task_id:
+            task_progress = progress_service.get_task_progress(latest_task_id)
+            if task_progress:
+                status = task_progress.get("status")
+                if status in ["queued", "processing", "waiting_for_research"]:
+                    logger.info(f"Analysis task {latest_task_id} for {username} is already in progress (status: {status}).")
+                    return {
+                        "status": "already_running",
+                        "message": f"An analysis for {username} is already in progress.",
+                        "task_id": latest_task_id,
+                        "current_status": status
+                    }
+                elif status == "completed":
+                    logger.info(f"Analysis for {username} (task {latest_task_id}) has already completed successfully.")
+                    return {
+                        "status": "already_completed",
+                        "message": f"A successful analysis for {username} already exists.",
+                        "task_id": latest_task_id,
+                        "results": task_progress.get("results")
+                    }
+                # If status is "failed", "cancelled", or None, we can proceed to create a new task.
+
+        # --- Generate and Queue New Task ---
+        task_id = str(uuid.uuid4())
+        
+        # Store the new task_id as the latest for this analysis
+        progress_service.redis.set(task_tracking_key, task_id, ex=86400) # 24-hour TTL
         
         # Initialize progress in Redis
         progress_service.set_task_progress(
@@ -364,81 +392,46 @@ async def complete_comments_analysis(
             status="queued"
         )
 
-        # Check if we should run in background (TaskIQ) or synchronously
-        if run_in_background:
-            # Send task to TaskIQ queue
-            try:
-                taskiq_task = await complete_instagram_comments_analysis_task.kiq(
-                    business_id=str(business_id),
-                    username=username,
-                    task_id=task_id,
-                    num_topics=num_topics,
-                    max_comments=max_comments,
-                    provider=provider,
-                    model=model,
-                    lang=lang
-                )
-                
-                logger.info(f"📤 TaskIQ comments analysis task queued with ID: {taskiq_task.task_id} for user {username}")
-                
-                # Update progress to indicate task was queued and store TaskIQ task ID
-                progress_service.update_task_progress(task_id, {
-                    "status": "queued",
-                    "taskiq_task_id": taskiq_task.task_id
-                })
-                
-                return {
-                    "status": "queued",
-                    "message": f"Complete comments analysis for {username} queued successfully",
-                    "username": username,
-                    "business_id": str(business_id),
-                    "task_id": task_id
-                }
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to queue TaskIQ comments analysis task: {str(e)}")
-                progress_service.set_task_failed(task_id, f"Failed to queue task: {str(e)}")
-                raise HTTPException(status_code=500, detail=f"Failed to queue comments analysis task: {str(e)}")
-        else:
-            # Run task synchronously through TaskIQ (wait for result)
-            try:
-                taskiq_task = await complete_instagram_comments_analysis_task.kiq(
-                    business_id=str(business_id),
-                    username=username,
-                    task_id=task_id,
-                    num_topics=num_topics,
-                    max_comments=max_comments,
-                    provider=provider,
-                    model=model,
-                    lang=lang
-                )
-                
-                # Wait for result (with timeout)
-                result = await taskiq_task.wait_result(timeout=300)  # 5 minutes timeout
-                
-                if result.is_err:
-                    raise HTTPException(status_code=500, detail=f"Comments analysis failed: {result.error}")
-                
-                return {
-                    "status": "completed",
-                    "message": f"Complete comments analysis for {username} completed successfully",
-                    "username": username,
-                    "business_id": str(business_id),
-                    "task_id": task_id,
-                    "results": result.return_value.get("results", {})
-                }
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to execute TaskIQ comments analysis task: {str(e)}")
-                progress_service.set_task_failed(task_id, str(e))
-                raise HTTPException(status_code=500, detail=f"Comments analysis failed: {str(e)}")
+        try:
+            taskiq_task = await complete_instagram_comments_analysis_task.kiq(
+                business_id=str(business_id),
+                username=username,
+                task_id=task_id,
+                num_topics=request.num_topics,
+                max_comments=request.max_comments,
+                provider=request.provider,
+                model=request.model,
+                lang=request.lang
+            )
+            
+            logger.info(f"📤 TaskIQ comments analysis task queued with ID: {taskiq_task.task_id} for user {username}")
+            
+            progress_service.update_task_progress(task_id, {
+                "status": "queued",
+                "taskiq_task_id": taskiq_task.task_id
+            })
+            
+            return {
+                "status": "queued",
+                "message": f"Complete comments analysis for {username} queued successfully",
+                "username": username,
+                "business_id": str(business_id),
+                "task_id": task_id
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to queue TaskIQ comments analysis task: {str(e)}")
+            progress_service.set_task_failed(task_id, f"Failed to queue task: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to queue comments analysis task: {str(e)}")
 
     except Exception as e:
-        # If there was a task_id created, update its status
-        if 'task_id' in locals():
+        task_id_local = locals().get('task_id')
+        if task_id_local:
             progress_service = get_task_progress_service()
-            progress_service.set_task_failed(task_id, str(e))
+            progress_service.set_task_failed(task_id_local, str(e))
         
+        if isinstance(e, HTTPException):
+            raise
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{business_id}/complete-comments-analysis/task/{task_id}")

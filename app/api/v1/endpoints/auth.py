@@ -1,5 +1,5 @@
 # app/api/v1/endpoints/auth.py
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
@@ -50,4 +50,27 @@ async def register(
             detail="Email already registered"
         )
     user = crud_user.create(db, obj_in=user_in)
+    return user
+
+@router.post("/create-superuser", response_model=UserInDBBase)
+async def create_superuser(
+    *,
+    db: Session = Depends(deps.get_db),
+    user_in: UserCreate,
+    secret_key: str = Header(..., alias="X-Superuser-Secret-Key")
+):
+    if secret_key != settings.SUPERUSER_SECRET_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid secret key for creating a superuser"
+        )
+    
+    user = crud_user.get_by_email(db, email=user_in.email)
+    if user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+        
+    user = crud_user.create(db, obj_in=user_in, is_superuser=True)
     return user

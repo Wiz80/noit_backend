@@ -2,6 +2,7 @@ import os
 import json
 import re
 from app.services.storage.minio_service import MinioService
+from app.core.config import settings
 
 class BaseInstagramAnalyzer:
     def __init__(self, username: str, output_folder: str, post_limit: int = 3, image_limit: int = 3):
@@ -10,7 +11,7 @@ class BaseInstagramAnalyzer:
         self.output_folder = output_folder
         self.post_limit = post_limit
         self.image_limit = image_limit
-        self.minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
+        self.minio_service = MinioService()
 
     async def load_comments(self):
         """Loads Instagram comments from MinIO."""

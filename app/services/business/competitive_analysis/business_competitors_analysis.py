@@ -241,11 +241,25 @@ class CompetitorAnalyzer:
         all_results = {}
         
         for competitor in competitors:
-            logger.info(f"Analyzing {competitor['full_name']}")
-            folder_name = competitor['full_name'].lower().replace(" ", "_") 
-            results = self.analyze_competitor(folder_name, provider=provider)
-            all_results[folder_name] = results
-            
+            try:
+                # Handle different possible field names for competitor name  
+                competitor_name = (
+                    competitor.get('full_name') or 
+                    competitor.get('name') or 
+                    competitor.get('competitor_name') or 
+                    'unknown_competitor'
+                )
+                
+                logger.info(f"Analyzing {competitor_name}")
+                folder_name = competitor_name.lower().replace(" ", "_") 
+                results = self.analyze_competitor(folder_name, provider=provider)
+                all_results[folder_name] = results
+                
+            except Exception as e:
+                logger.error(f"Error analyzing competitor {competitor}: {str(e)}")
+                # Continue with the next competitor instead of failing completely
+                continue
+                
         return all_results
     
 # Example usage

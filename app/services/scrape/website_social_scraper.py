@@ -25,7 +25,7 @@ class WebsiteSocialMediaScraper:
     def __init__(
         self, 
         llm_provider: str = "openai", 
-        llm_model: str = "gpt-3.5-turbo", 
+        llm_model: str = "gpt-4o-mini", 
         api_key: Optional[str] = None,
         headless: bool = True,
         verbose: bool = False
@@ -535,7 +535,7 @@ class WebsiteSocialMediaScraper:
 async def extract_social_media_from_website(
     website_url: str,
     llm_provider: str = "openai",
-    llm_model: str = "gpt-3.5-turbo",
+    llm_model: str = "gpt-4o-mini",
     api_key: Optional[str] = None
 ) -> Dict[str, Dict[str, str]]:
     """

@@ -1,6 +1,7 @@
 import os
 from typing import List, Optional, Dict, Any
 from uuid import UUID
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -9,11 +10,14 @@ from app.api.deps import get_db
 from app.models.business.business_idea import BusinessIdea
 from app.models.business.competitive_analysis.instagram import InstagramUserInfo
 from app.services.business.competitive_analysis.instagram.instagram_image_analyzer import InstagramImageAnalyzer
+from app.models.user import User
 
 # Import TaskIQ task
 from app.tasks.instagram_analysis_tasks import complete_instagram_image_analysis_task
 # Import task progress service
 from app.services.cache.task_progress_service import get_task_progress_service
+
+from app.core.config import settings
 
 import logging
 logger = logging.getLogger(__name__)
@@ -42,7 +46,6 @@ class AnalysisResponse(BaseModel):
 class CompleteImageAnalysisRequest(BaseModel):
     instagram_username: str
     posts_limit: Optional[int] = None
-    run_in_background: bool = False
 
 # Endpoints
 @router.post("/{business_id}/analyze-posts-images", response_model=AnalysisResponse)
@@ -207,16 +210,15 @@ async def analyze_instagram_feed(
 async def complete_image_analysis(
     business_id: UUID,
     request: CompleteImageAnalysisRequest,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
 ):
     """
     Run a complete image analysis on Instagram posts and feed for a specific username using TaskIQ.
     
     Args:
         business_id: UUID of the business idea
-        request: CompleteImageAnalysisRequest with instagram_username, posts_limit, and run_in_background
-        background_tasks: Background tasks runner (deprecated, using TaskIQ)
+        request: CompleteImageAnalysisRequest with instagram_username and posts_limit
         db: Database session
         
     Returns:
@@ -225,8 +227,6 @@ async def complete_image_analysis(
     try:
         # Extract parameters from request
         username = request.instagram_username
-        posts_limit = request.posts_limit
-        run_in_background = request.run_in_background
         
         # Verify if business_id exists
         business = db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first()
@@ -238,86 +238,81 @@ async def complete_image_analysis(
         if not instagram_user:
             raise HTTPException(status_code=404, detail=f"Instagram user {username} not found. You may need to scrape this profile first.")
         
-        # Generate a unique task ID
-        task_id = str(uuid.uuid4())
-        
         # Get progress service
         progress_service = get_task_progress_service()
         
-        # Initialize progress in Redis
+        # --- Task Existence Check ---
+        task_tracking_key = f"latest_task:instagram_image_analysis:{business_id}:{username}"
+        latest_task_id = progress_service.redis.get(task_tracking_key)
+        
+        if latest_task_id:
+            task_progress = progress_service.get_task_progress(latest_task_id)
+            if task_progress:
+                status = task_progress.get("status")
+                if status in ["queued", "processing", "waiting_for_research"]:
+                    logger.info(f"Image analysis task {latest_task_id} for {username} is already in progress (status: {status}).")
+                    return {
+                        "status": "already_running",
+                        "message": f"An image analysis for {username} is already in progress.",
+                        "task_id": latest_task_id,
+                        "current_status": status
+                    }
+                elif status == "completed":
+                    logger.info(f"Image analysis for {username} (task {latest_task_id}) has already completed successfully.")
+                    return {
+                        "status": "already_completed",
+                        "message": f"A successful image analysis for {username} already exists.",
+                        "task_id": latest_task_id,
+                        "results": task_progress.get("results")
+                    }
+                
+        # --- Generate and Queue New Task ---
+        task_id = str(uuid.uuid4())
+        
+        progress_service.redis.set(task_tracking_key, task_id, ex=86400) # 24-hour TTL
+        
         progress_service.set_task_progress(
             task_id=task_id,
             progress=0,
             status="queued"
         )
 
-        # Check if we should run in background (TaskIQ) or synchronously
-        if run_in_background:
-            # Send task to TaskIQ queue
-            try:
-                taskiq_task = await complete_instagram_image_analysis_task.kiq(
-                    business_id=str(business_id),
-                    username=username,
-                    task_id=task_id,
-                    posts_limit=posts_limit
-                )
-                
-                logger.info(f"📤 TaskIQ image analysis task queued with ID: {taskiq_task.task_id} for user {username}")
-                
-                # Update progress to indicate task was queued and store TaskIQ task ID
-                progress_service.update_task_progress(task_id, {
-                    "status": "queued",
-                    "taskiq_task_id": taskiq_task.task_id
-                })
-                
-                return {
-                    "status": "queued",
-                    "message": f"Complete image analysis for {username} queued successfully",
-                    "username": username,
-                    "business_id": str(business_id),
-                    "task_id": task_id
-                }
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to queue TaskIQ image analysis task: {str(e)}")
-                progress_service.set_task_failed(task_id, f"Failed to queue task: {str(e)}")
-                raise HTTPException(status_code=500, detail=f"Failed to queue image analysis task: {str(e)}")
-        else:
-            # Run task synchronously through TaskIQ (wait for result)
-            try:
-                taskiq_task = await complete_instagram_image_analysis_task.kiq(
-                    business_id=str(business_id),
-                    username=username,
-                    task_id=task_id,
-                    posts_limit=posts_limit
-                )
-                
-                # Wait for result (with timeout)
-                result = await taskiq_task.wait_result(timeout=600)  # 10 minutes timeout for image analysis
-                
-                if result.is_err:
-                    raise HTTPException(status_code=500, detail=f"Image analysis failed: {result.error}")
-                
-                return {
-                    "status": "completed",
-                    "message": f"Complete image analysis for {username} completed successfully",
-                    "username": username,
-                    "business_id": str(business_id),
-                    "task_id": task_id,
-                    "results": result.return_value.get("results", {})
-                }
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to execute TaskIQ image analysis task: {str(e)}")
-                progress_service.set_task_failed(task_id, str(e))
-                raise HTTPException(status_code=500, detail=f"Image analysis failed: {str(e)}")
+        try:
+            taskiq_task = await complete_instagram_image_analysis_task.kiq(
+                business_id=str(business_id),
+                username=username,
+                task_id=task_id,
+                posts_limit=request.posts_limit
+            )
+            
+            logger.info(f"📤 TaskIQ image analysis task queued with ID: {taskiq_task.task_id} for user {username}")
+            
+            progress_service.update_task_progress(task_id, {
+                "status": "queued",
+                "taskiq_task_id": taskiq_task.task_id
+            })
+            
+            return {
+                "status": "queued",
+                "message": f"Complete image analysis for {username} queued successfully",
+                "username": username,
+                "business_id": str(business_id),
+                "task_id": task_id
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to queue TaskIQ image analysis task: {str(e)}")
+            progress_service.set_task_failed(task_id, f"Failed to queue task: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to queue image analysis task: {str(e)}")
 
     except Exception as e:
-        # If there was a task_id created, update its status
-        if 'task_id' in locals():
+        task_id_local = locals().get('task_id')
+        if task_id_local:
             progress_service = get_task_progress_service()
-            progress_service.set_task_failed(task_id, str(e))
+            progress_service.set_task_failed(task_id_local, str(e))
         
+        if isinstance(e, HTTPException):
+            raise
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{business_id}/posts-image-analysis/{instagram_username}")

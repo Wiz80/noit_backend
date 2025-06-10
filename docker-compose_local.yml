@@ -8,6 +8,11 @@ volumes:
   taskiq-admin-data:
     driver: local
 
+networks:
+  noit_network:
+    driver: bridge
+    name: noit_network
+
 services:
   postgres:
     image: postgres
@@ -22,47 +27,57 @@ services:
       interval: 30s
       timeout: 10s
       retries: 10
+    networks:
+      - noit_network
 
   redis:
     image: redis:6.2-alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --save 60 1 --loglevel warning
+    env_file:
+      - .env
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning", "--requirepass", "${REDIS_PASSWORD}"]
+    networks:
+      - noit_network
 
   # FastAPI Application
-  # app:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   container_name: noit_fastapi_app
-  #   command: >
-  #     bash -c "
-  #       echo '🚀 Starting FastAPI application with Gunicorn + Uvicorn workers...' &&
-  #       gunicorn app.main:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 120 --keep-alive 5 --access-logfile - --error-logfile -
-  #     "
-  #   ports:
-  #     - "${APP_PORT:-8000}:8000"
-  #   environment:
-  #     - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-  #     - TASKIQ_ADMIN_URL=http://taskiq-admin:3000
-  #     - TASKIQ_ADMIN_API_TOKEN=${TASKIQ_ADMIN_API_TOKEN}
-  #     - TASKIQ_BROKER_NAME=noit_backend_app
-  #   env_file:
-  #     - .env
-  #   depends_on:
-  #     - redis
-  #     - taskiq-admin
-  #   volumes:
-  #     - .:/app
-  #   working_dir: /app
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-  #     interval: 30s
-  #     timeout: 10s
-  #     retries: 3
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: noit_fastapi_app
+    command: >
+      bash -c "
+        echo '🚀 Starting FastAPI application with Gunicorn + Uvicorn workers...' &&
+        gunicorn app.main:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --timeout 120 --keep-alive 5 --access-logfile - --error-logfile -
+      "
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - TASKIQ_ADMIN_URL=http://taskiq-admin:3000
+      - TASKIQ_ADMIN_API_TOKEN=${TASKIQ_ADMIN_API_TOKEN}
+      - TASKIQ_BROKER_NAME=noit_backend_app
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - taskiq-admin
+    volumes:
+      - .:/app
+    working_dir: /app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - noit_network
 
   # Taskiq Worker
   taskiq-worker:
@@ -79,7 +94,8 @@ services:
         --fs-discover
       "
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - TASKIQ_ADMIN_URL=http://taskiq-admin:3000
       - TASKIQ_ADMIN_API_TOKEN=supersecret
       - TASKIQ_BROKER_NAME=noit_backend_worker
@@ -92,6 +108,8 @@ services:
       - .:/app
     working_dir: /app
     restart: unless-stopped
+    networks:
+      - noit_network
 
   # Taskiq Admin Dashboard
   taskiq-admin:
@@ -105,6 +123,8 @@ services:
       - taskiq-admin-data:/usr/database/
     depends_on:
       - redis
+    networks:
+      - noit_network
 
   kestra:
     image: kestra/kestra:latest
@@ -151,3 +171,5 @@ services:
     depends_on:
       postgres:
         condition: service_started
+    networks:
+      - noit_network

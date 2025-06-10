@@ -4,6 +4,8 @@ import json
 from datetime import datetime
 from typing import Dict, Any
 from dotenv import load_dotenv
+import httpx
+import os
 
 from app.api import deps
 from app.models.business.competitive_analysis.business_competitor import CompetitorResearch, CompetitorResearchStatus
@@ -12,7 +14,7 @@ from app.models.business.business_understanding.business_model import BusinessMo
 from app.services.business.competitive_analysis.business_competitors_extraction import EnhancedBusinessAnalyzer, BusinessModel
 from app.services.storage.minio_service import MinioService
 import app.prompts.business.prompts_business_competitors as prompts
-from app.utils.decode_json import clean_json_encoding, extract_and_parse_json
+from app.utils.decode_json import clean_json_encoding, extract_and_parse_json, save_problematic_content
 
 # Import settings
 from app.core.config import settings
@@ -22,6 +24,45 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Configuración temporal para debugging detallado
+logging.getLogger('app.utils.decode_json').setLevel(logging.DEBUG)
+
+def get_social_media_extraction_webhook_url():
+    """Constructs the Kestra webhook URL for social media extraction."""
+    kestra_base_url = os.getenv("KESTRA_BASE_URL", "http://kestra:8080")
+    namespace = "noit.backend"
+    flow_id = "social-media-extraction-trigger"
+    webhook_key = os.getenv("KESTRA_SOCIAL_MEDIA_KEY", "ks_wht_zXcVbNmLk8jH5fD2")
+    return f"{kestra_base_url}/api/v1/executions/webhook/{namespace}/{flow_id}/{webhook_key}"
+
+async def trigger_social_media_extraction_webhook(business_id: str):
+    """Triggers a Kestra webhook to start social media extraction for all competitors."""
+    webhook_url = get_social_media_extraction_webhook_url()
+    payload = {
+        "business_id": business_id,
+        "update_db": True
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            logger.info(f"Triggering Kestra webhook for social media extraction: {webhook_url}")
+            response = await client.post(webhook_url, json=payload, timeout=30.0)
+            
+            if response.status_code >= 400:
+                logger.error(
+                    f"Error triggering Kestra social media extraction webhook for business {business_id}. "
+                    f"Status: {response.status_code}, Response: {response.text}"
+                )
+            else:
+                logger.info(
+                    f"Kestra social media extraction webhook for business {business_id} triggered successfully. "
+                    f"Execution ID: {response.json().get('executionId')}"
+                )
+    except httpx.RequestError as e:
+        logger.error(f"RequestError while triggering Kestra social media extraction webhook for business {business_id}: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error while triggering Kestra social media extraction webhook for business {business_id}: {str(e)}")
 
 class WebhookController:
     """
@@ -127,8 +168,8 @@ class WebhookController:
                         analyzer = EnhancedBusinessAnalyzer(
                             business_model=business_model,
                             lang=research.language or "es",
-                            validator_provider="anthropic",  # Valores predeterminados
-                            validator_model="claude-3-5-sonnet-20241022",
+                            validator_provider="openai",  # Valores predeterminados
+                            validator_model="gpt-4o-mini",
                             max_depth=1,
                             research_model=research.model or "sonar-deep-research",
                             db=db_session
@@ -143,52 +184,94 @@ class WebhookController:
                             logger.info("Procesando datos raw de competidores...")
                             raw_response = competitors_data
                             
-                            # OPTIMIZACIÓN: Intentar primero parsing automático antes del LLM
-                            logger.info("Intentando extracción automática de JSON...")
-                            parsed_data, needs_llm = extract_and_parse_json(raw_response)
-                            
-                            if not needs_llm and parsed_data:
-                                # Extraer competidores del JSON parseado automáticamente
-                                if 'competitors_analysis' in parsed_data and 'competitors' in parsed_data['competitors_analysis']:
-                                    competitors_structured = parsed_data['competitors_analysis']['competitors']
-                                elif 'competitors' in parsed_data:
-                                    competitors_structured = parsed_data['competitors']
-                                else:
-                                    # Si no tiene la estructura esperada, intentar extraer de cualquier lista
-                                    competitors_structured = []
-                                    for key, value in parsed_data.items():
-                                        if isinstance(value, list) and len(value) > 0:
-                                            # Verificar si los elementos de la lista parecen competidores
-                                            first_item = value[0]
-                                            if isinstance(first_item, dict) and any(k in first_item for k in ['name', 'website', 'similarity_score']):
-                                                competitors_structured = value
-                                                break
+                            # Fallback al parsing con LLM si la extracción automática falló
+                            #logger.info("Extracción automática falló, usando parsing con LLM...")
+                            try:
+                                # Parse response with LLM to structured JSON
+                                logger.info("Parseando respuesta de investigación con LLM...")
+                                prompt_parsing = prompts.create_parsing_prompt_competitors(
+                                    lang=research.language or "es",
+                                    raw_response=raw_response
+                                )
                                 
-                                logger.info(f"JSON parseado automáticamente - extraídos {len(competitors_structured)} competidores")
-                            else:
-                                # Fallback al parsing con LLM si la extracción automática falló
-                                logger.info("Extracción automática falló, usando parsing con LLM...")
-                                try:
-                                    # Parse response with LLM to structured JSON
-                                    logger.info("Parseando respuesta de investigación con LLM...")
-                                    prompt_parsing = prompts.create_parsing_prompt_competitors(
-                                        lang=research.language or "es",
-                                        raw_response=raw_response
-                                    )
-                                    
-                                    # Parsear con LLM a JSON estructurado final
-                                    competitors_parsed = await analyzer._parse_response_with_llm(prompt=prompt_parsing)
-                                    logger.info(f"Datos parseados de competidores con LLM: {competitors_parsed}")
-                                    
+                                # Parsear con LLM a JSON estructurado final
+                                competitors_parsed = await analyzer._parse_response_with_llm(prompt=prompt_parsing)
+                                logger.info(f"Datos parseados de competidores con LLM: {competitors_parsed}")
+                                
+                                # Verificar que la respuesta del LLM sea válida
+                                if not competitors_parsed or not isinstance(competitors_parsed, dict):
+                                    logger.error("LLM devolvió respuesta vacía o inválida")
+                                    competitors_structured = []
+                                else:
                                     competitors_structured = competitors_parsed.get('competitors', [])
                                     logger.info(f"Extraídos {len(competitors_structured)} competidores de datos raw con LLM")
-                                except Exception as e:
-                                    logger.error(f"Error parseando competidores con LLM: {str(e)}")
+                                    
+                                    # Validar que la estructura es correcta
+                                    if not isinstance(competitors_structured, list):
+                                        logger.error("LLM devolvió estructura no válida para 'competitors'")
+                                        competitors_structured = []
+                                    elif len(competitors_structured) == 0:
+                                        logger.warning("LLM devolvió lista vacía de competidores")
+                                        
+                                        # FALLBACK FINAL: Intentar una vez más el parsing automático con limpieza agresiva
+                                        logger.info("Intentando fallback final con limpieza agresiva...")
+                                        try:
+                                            # Usar solo la parte central del texto que parece ser JSON
+                                            json_start = raw_response.find('{')
+                                            json_end = raw_response.rfind('}') + 1
+                                            if json_start >= 0 and json_end > json_start:
+                                                json_only = raw_response[json_start:json_end]
+                                                parsed_fallback, _ = extract_and_parse_json(json_only)
+                                                if parsed_fallback:
+                                                    fallback_competitors = parsed_fallback.get('competitors', [])
+                                                    if len(fallback_competitors) > 0:
+                                                        logger.info(f"Fallback exitoso: {len(fallback_competitors)} competidores")
+                                                        competitors_structured = fallback_competitors
+                                        except Exception as fallback_e:
+                                            logger.error(f"Fallback final también falló: {fallback_e}")
+                                    
+                            except Exception as e:
+                                logger.error(f"Error parseando competidores con LLM: {str(e)}")
+                                logger.error(f"Raw response que causó el error (primeros 1000 chars): {raw_response[:1000]}")
+                                
+                                # Guardar contenido problemático para análisis
+                                save_problematic_content(raw_response, "llm_parsing_failed")
+                                
+                                # FALLBACK DE EMERGENCIA: Intentar parsing automático directo
+                                logger.info("Intentando fallback de emergencia con parsing directo...")
+                                try:
+                                    # Buscar solo la parte que parece JSON válido
+                                    json_start = raw_response.find('{')
+                                    json_end = raw_response.rfind('}') + 1
+                                    if json_start >= 0 and json_end > json_start:
+                                        json_part = raw_response[json_start:json_end]
+                                        emergency_parsed, emergency_needs_llm = extract_and_parse_json(json_part)
+                                        if not emergency_needs_llm and emergency_parsed:
+                                            emergency_competitors = emergency_parsed.get('competitors', [])
+                                            if len(emergency_competitors) > 0:
+                                                logger.info(f"Fallback de emergencia exitoso: {len(emergency_competitors)} competidores")
+                                                competitors_structured = emergency_competitors
+                                            else:
+                                                competitors_structured = []
+                                        else:
+                                            competitors_structured = []
+                                    else:
+                                        competitors_structured = []
+                                except Exception as emergency_e:
+                                    logger.error(f"Fallback de emergencia también falló: {emergency_e}")
                                     competitors_structured = []
                         else:
-                            # Si ya recibimos datos estructurados
-                            competitors_structured = competitors_data
-                            logger.info(f"Recibidos {len(competitors_structured)} competidores pre-estructurados")
+                            # Si ya recibimos datos estructurados (list o dict)
+                            if isinstance(competitors_data, list):
+                                competitors_structured = competitors_data
+                                logger.info(f"Recibidos {len(competitors_structured)} competidores como lista pre-estructurada")
+                            elif isinstance(competitors_data, dict):
+                                # Si es un diccionario, extraer la lista de competidores
+                                competitors_structured = competitors_data.get('competitors', [])
+                                logger.info(f"Extraídos {len(competitors_structured)} competidores de diccionario pre-estructurado")
+                            else:
+                                logger.error(f"Tipo de datos de competidores no soportado: {type(competitors_data)}")
+                                competitors_structured = []
                         
                         # Guardar competidores en la base de datos
                         logger.info("Guardando competidores en la base de datos...")
@@ -219,6 +302,13 @@ class WebhookController:
                             content_type='application/json'
                         )
                         logger.info(f"Competidores parseados almacenados en MinIO: {results_filename}")
+                        
+                        # Trigger the next step in the workflow: Social Media Extraction
+                        if competitors_structured:
+                             logger.info(f"Triggering social media extraction for business_id: {business_id}")
+                             await trigger_social_media_extraction_webhook(business_id=business_id)
+                        else:
+                             logger.info(f"Skipping social media extraction for {business_id}: no competitors found.")
                         
                     except Exception as e:
                         logger.error(f"Error procesando datos de competidores: {str(e)}")

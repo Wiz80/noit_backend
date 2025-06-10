@@ -21,6 +21,7 @@ from app.models.business.business_progress import BusinessProgress, StepStatus
 from app.models.business.competitive_analysis.business_competitor import CompetitorResearch, CompetitorResearchStatus
 from app.models.business.competitive_analysis.competitors import Competitor
 from app.models.business.business_understanding.business_model import BusinessModel as BusinessModelDB
+from app.models.user import User
 
 from app.schemas.business.business_competitors import CompetitorAnalysisRequest, CompetitorAnalysisCallback
 from sqlalchemy.orm import Session
@@ -55,7 +56,8 @@ class InternalCompetitorAnalysisRequest(BaseModel):
 async def analyze_competitors(
     business_id: str,
     request: Optional[InternalCompetitorAnalysisRequest] = None,
-    db: Session = Depends(deps.get_db)
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
 ) -> JSONResponse:
     """
     Internal endpoint to analyze competitors based on a business model.

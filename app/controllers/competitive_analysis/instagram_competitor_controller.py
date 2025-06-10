@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from app.models.business.competitive_analysis.instagram import InstagramScrapingJob
 from app.services.business.competitive_analysis.instagram.instagram_scraper import InstagramScraper
 from app.db.session import SessionLocal
+from app.core.config import settings
 
 load_dotenv()
 

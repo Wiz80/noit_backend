@@ -18,6 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     liblapack-dev \
     gfortran \
     git \
+    curl \
+    wget \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -33,6 +35,9 @@ RUN poetry config virtualenvs.create false
 
 # Install dependencies with architecture-specific optimizations
 RUN poetry install --without dev --no-interaction --no-ansi --no-root
+
+# Install Playwright browsers
+RUN playwright install --with-deps chromium
 
 # Install Spanish model
 RUN python -m spacy download es_core_news_sm

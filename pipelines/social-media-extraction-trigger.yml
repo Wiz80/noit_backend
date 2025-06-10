@@ -7,16 +7,6 @@ inputs:
     type: STRING
     required: true
     description: "Business ID to process competitors for"
-  
-  - id: max_concurrent_extractions
-    type: INT
-    defaults: 3
-    description: "Maximum number of concurrent social media extractions"
-
-  - id: process_all_competitors
-    type: BOOLEAN
-    defaults: true
-    description: "Whether to process all competitors regardless of existing social media data"
 
   - id: competitor_ids
     type: ARRAY
@@ -24,329 +14,23 @@ inputs:
     required: false
     description: "Optional: specific competitor IDs to process (if not provided, processes all for business)"
 
+  - id: update_db
+    type: BOOLEAN
+    defaults: true
+    description: "Whether to update the database with extracted social media information"
+
 tasks:
   - id: log_pipeline_start
     type: io.kestra.plugin.core.log.Log
     message: |
       🚀 Starting Social Media Extraction Pipeline
       Business ID: {{ inputs.business_id }}
-      Max concurrent: {{ inputs.max_concurrent_extractions }}
-      Process all competitors: {{ inputs.process_all_competitors }}
-      Specific competitor IDs: {{ inputs.competitor_ids | length if inputs.competitor_ids else 'None (process all)' }}
+      Specific competitor IDs: {{ inputs.competitor_ids ? (inputs.competitor_ids | length) : 'None (process all)' }}
+      Update DB: {{ inputs.update_db }}
 
-  - id: check_database_connection
-    type: io.kestra.plugin.jdbc.postgresql.Query
-    url: "jdbc:postgresql://44.204.96.182:5432/business_ai"
-    username: "noit-user-dev"
-    password: "password"
-    sql: "SELECT NOW() as current_time;"
-    store: true
-
-  - id: validate_business_exists
-    type: io.kestra.plugin.jdbc.postgresql.Query
-    url: "jdbc:postgresql://44.204.96.182:5432/business_ai"
-    username: "noit-user-dev"
-    password: "password"
-    sql: |
-      SELECT 
-        id,
-        title,
-        description,
-        created_at
-      FROM business_ideas 
-      WHERE id = '{{ inputs.business_id }}'
-      LIMIT 1;
-    store: true
-
-  - id: check_business_validation
-    type: io.kestra.plugin.scripts.python.Script
-    containerImage: python:3.11-alpine
-    script: |
-      import json
-      
-      business_data = {{ outputs.validate_business_exists.rows }}
-      business_id = "{{ inputs.business_id }}"
-      
-      print(f"🔍 Validating business ID: {business_id}")
-      
-      if not business_data or len(business_data) == 0:
-          print(f"❌ Business with ID {business_id} not found")
-          exit(1)
-      
-      business = business_data[0]
-      print(f"✅ Business found: {business.get('title', 'Unknown Title')}")
-      print(f"   ID: {business.get('id')}")
-      print(f"   Description: {business.get('description', 'No description')[:100]}...")
-      print(f"   Created: {business.get('created_at')}")
-
-  - id: find_competitors_for_business
-    type: io.kestra.plugin.jdbc.postgresql.Query
-    url: "jdbc:postgresql://44.204.96.182:5432/business_ai"
-    username: "noit-user-dev"
-    password: "password"
-    sql: |
-      SELECT 
-        c.id as competitor_id,
-        c.business_idea_id,
-        c.competitor_name,
-        c.website,
-        c.instagram_url,
-        c.facebook_url,
-        c.linkedin_url,
-        c.x_url,
-        c.youtube_url,
-        c.tiktok_url,
-        bi.title as business_title,
-        -- Check if social media extraction is needed
-        CASE 
-          WHEN c.website IS NOT NULL 
-            AND c.website != ''
-            AND (
-              '{{ inputs.process_all_competitors }}' = 'true' OR
-              c.instagram_url IS NULL OR c.instagram_url = '' OR
-              c.facebook_url IS NULL OR c.facebook_url = '' OR
-              c.linkedin_url IS NULL OR c.linkedin_url = '' OR
-              c.x_url IS NULL OR c.x_url = '' OR
-              c.youtube_url IS NULL OR c.youtube_url = '' OR
-              c.tiktok_url IS NULL OR c.tiktok_url = ''
-            )
-          THEN true 
-          ELSE false 
-        END as needs_social_media_extraction,
-        c.created_at,
-        c.updated_at
-      FROM competitors c
-      LEFT JOIN business_ideas bi ON c.business_idea_id = bi.id
-      WHERE c.business_idea_id = '{{ inputs.business_id }}'
-        AND c.website IS NOT NULL 
-        AND c.website != ''
-        {% if inputs.competitor_ids %}
-        AND c.id = ANY(ARRAY[{% for id in inputs.competitor_ids %}'{{ id }}'{% if not loop.last %},{% endif %}{% endfor %}])
-        {% endif %}
-        AND (
-          '{{ inputs.process_all_competitors }}' = 'true' OR
-          -- Need social media extraction (at least one field is empty)
-          c.instagram_url IS NULL OR c.instagram_url = '' OR
-          c.facebook_url IS NULL OR c.facebook_url = '' OR
-          c.linkedin_url IS NULL OR c.linkedin_url = '' OR
-          c.x_url IS NULL OR c.x_url = '' OR
-          c.youtube_url IS NULL OR c.youtube_url = '' OR
-          c.tiktok_url IS NULL OR c.tiktok_url = ''
-        )
-      ORDER BY c.created_at DESC;
-    store: true
-
-  - id: log_competitors_found
-    type: io.kestra.plugin.scripts.python.Script
-    containerImage: python:3.11-alpine
-    script: |
-      import json
-      
-      competitors = {{ outputs.find_competitors_for_business.rows }}
-      business_id = "{{ inputs.business_id }}"
-      process_all = "{{ inputs.process_all_competitors }}"
-      
-      print(f"📊 Competitors Analysis for Business: {business_id}")
-      print(f"Process all competitors: {process_all}")
-      print(f"Total competitors found: {len(competitors)}")
-      
-      if competitors:
-          print("\n🏢 Competitors to process:")
-          for i, competitor in enumerate(competitors, 1):
-              name = competitor.get('competitor_name', 'Unknown')
-              website = competitor.get('website', 'No website')
-              needs_extraction = competitor.get('needs_social_media_extraction', False)
-              print(f"{i}. {name}")
-              print(f"   Website: {website}")
-              print(f"   Needs extraction: {'✅ Yes' if needs_extraction else '❌ No'}")
-              print()
-      else:
-          print("\n⚠️ No competitors found matching criteria")
-          print("This might be because:")
-          print("- No competitors exist for this business")
-          print("- All competitors already have complete social media data")
-          print("- No competitors have websites")
-
-  - id: process_competitors_batch
-    type: io.kestra.plugin.core.flow.EachSequential
-    value: "{{ outputs.find_competitors_for_business.rows }}"
-    tasks:
-      - id: log_competitor_processing
-        type: io.kestra.plugin.core.log.Log
-        message: |
-          📋 Processing competitor: {{ taskrun.value.competitor_name }}
-          Business: {{ taskrun.value.business_title }}
-          Website: {{ taskrun.value.website }}
-          Competitor ID: {{ taskrun.value.competitor_id }}
-          Business ID: {{ taskrun.value.business_idea_id }}
-          Needs extraction: {{ taskrun.value.needs_social_media_extraction }}
-
-      - id: extract_social_media_for_competitor
-        type: io.kestra.plugin.core.http.Request
-        uri: "http://host.docker.internal:8000/api/v1/business/competitive-analysis/social-media/{{ taskrun.value.business_idea_id }}"
-        method: "POST"
-        contentType: "application/json"
-        headers:
-          Content-Type: "application/json"
-          User-Agent: "Kestra-SocialMedia-Pipeline/1.0"
-        body: |
-          {
-            "update_db": true,
-            "competitor_ids": ["{{ taskrun.value.competitor_id }}"]
-          }
-        timeout: "PT120S"
-
-      - id: process_extraction_response
-        type: io.kestra.plugin.scripts.python.Script
-        containerImage: python:3.11-alpine
-        script: |
-          import json
-          
-          # Check the response from the social media extraction
-          extraction_response = {{ outputs.extract_social_media_for_competitor }}
-          competitor_id = "{{ taskrun.value.competitor_id }}"
-          competitor_name = "{{ taskrun.value.competitor_name }}"
-          business_id = "{{ taskrun.value.business_idea_id }}"
-          
-          print(f"🔍 Social media extraction response for competitor {competitor_name}:")
-          print(f"Status Code: {extraction_response.get('code', 'Unknown')}")
-          
-          # Parse response body
-          body = extraction_response.get('body', {})
-          if isinstance(body, str):
-              try:
-                  body = json.loads(body)
-              except:
-                  print("Could not parse response body as JSON")
-                  body = {}
-          
-          print(f"Response Body: {json.dumps(body, indent=2)}")
-          
-          # Check if successful
-          status_code = extraction_response.get('code', 500)
-          if status_code in [200, 202]:
-              print("✅ Social media extraction successfully triggered")
-              
-              task_id = body.get('task_id', 'Unknown') if isinstance(body, dict) else 'Unknown'
-              print(f"📋 Task ID: {task_id}")
-              
-              # Store success info
-              result = {
-                  "success": True,
-                  "competitor_id": competitor_id,
-                  "competitor_name": competitor_name,
-                  "business_id": business_id,
-                  "task_id": task_id,
-                  "status_code": status_code,
-                  "message": body.get('message', 'Social media extraction started') if isinstance(body, dict) else 'Social media extraction started'
-              }
-              
-          else:
-              print(f"❌ Failed to trigger social media extraction")
-              print(f"Error details: {body}")
-              
-              # Store error info
-              result = {
-                  "success": False,
-                  "competitor_id": competitor_id,
-                  "competitor_name": competitor_name,
-                  "business_id": business_id,
-                  "status_code": status_code,
-                  "error": body,
-                  "message": "Failed to trigger social media extraction"
-              }
-          
-          # Write result to file
-          with open('/tmp/extraction_result.json', 'w') as f:
-              json.dump(result, f, indent=2)
-              
-          print(f"Result: {json.dumps(result, indent=2)}")
-        outputFiles:
-          - "/tmp/extraction_result.json"
-
-      - id: log_competitor_completion
-        type: io.kestra.plugin.core.log.Log
-        message: |
-          🎯 Completed processing competitor: {{ taskrun.value.competitor_name }}
-          
-          Extraction Result: {{ json(outputs.process_extraction_response.outputFiles['/tmp/extraction_result.json']).success ? '✅ SUCCESS' : '❌ FAILED' }}
-          
-          Task ID: {{ json(outputs.process_extraction_response.outputFiles['/tmp/extraction_result.json']).task_id ?? 'N/A' }}
-          
-          Competitor Details:
-          - Name: {{ taskrun.value.competitor_name }}
-          - Website: {{ taskrun.value.website }}
-          - Business: {{ taskrun.value.business_title }}
-
-  - id: generate_summary_report
-    type: io.kestra.plugin.scripts.python.Script
-    containerImage: python:3.11-alpine
-    script: |
-      import json
-      from datetime import datetime
-      
-      # Get the list of competitors that were processed
-      competitors = {{ outputs.find_competitors_for_business.rows }}
-      business_id = "{{ inputs.business_id }}"
-      
-      print("📊 Social Media Extraction Pipeline Summary Report")
-      print("=" * 60)
-      print(f"Execution Time: {datetime.now().isoformat()}")
-      print(f"Business ID: {business_id}")
-      print(f"Total Competitors Found: {len(competitors)}")
-      print(f"Process All Competitors: {{ inputs.process_all_competitors }}")
-      
-      if competitors:
-          print(f"\n🏢 Processed Competitors:")
-          for i, competitor in enumerate(competitors, 1):
-              print(f"{i}. {competitor.get('competitor_name', 'Unknown')}")
-              print(f"   Website: {competitor.get('website', 'N/A')}")
-              print(f"   Business: {competitor.get('business_title', 'N/A')}")
-              print(f"   ID: {competitor.get('competitor_id', 'N/A')}")
-              print()
-      else:
-          print("\n✅ No competitors requiring social media extraction found.")
-      
-      # Generate summary data
-      summary = {
-          "execution_time": datetime.now().isoformat(),
-          "business_id": business_id,
-          "total_competitors_found": len(competitors),
-          "process_all_competitors": "{{ inputs.process_all_competitors }}",
-          "specific_competitor_ids": {{ inputs.competitor_ids | tojson if inputs.competitor_ids else "null" }},
-          "competitors_processed": [
-              {
-                  "competitor_id": comp.get('competitor_id'),
-                  "competitor_name": comp.get('competitor_name'),
-                  "website": comp.get('website'),
-                  "business_title": comp.get('business_title'),
-                  "needs_extraction": comp.get('needs_social_media_extraction')
-              } for comp in competitors
-          ]
-      }
-      
-      # Write summary to file
-      with open('/tmp/pipeline_summary.json', 'w') as f:
-          json.dump(summary, f, indent=2)
-      
-      print(f"\n📋 Pipeline execution completed successfully!")
-      print(f"Summary saved to pipeline_summary.json")
-    outputFiles:
-      - "/tmp/pipeline_summary.json"
-
-  - id: log_pipeline_completion
-    type: io.kestra.plugin.core.log.Log
-    message: |
-      🏁 Social Media Extraction Pipeline Completed
-      
-      Business ID: {{ inputs.business_id }}
-      Total Competitors Processed: {{ outputs.find_competitors_for_business.rows | length }}
-      
-      Pipeline Summary: {{ json(outputs.generate_summary_report.outputFiles['/tmp/pipeline_summary.json']) }}
-
-  - id: trigger_instagram_analysis
+  - id: trigger_social_media_extraction
     type: io.kestra.plugin.core.http.Request
-    uri: "http://localhost:8080/api/v1/executions/webhook/noit.backend/instagram-analysis-complete-trigger/instagram_analysis_after_social_media"
+    uri: "http://app:8000/api/v1/analyze-competitors/extract-social-media/{{ inputs.business_id }}"
     method: "POST"
     contentType: "application/json"
     headers:
@@ -354,37 +38,26 @@ tasks:
       User-Agent: "Kestra-SocialMedia-Pipeline/1.0"
     body: |
       {
-        "event": "social_media_extraction_completed",
-        "source_pipeline": "social-media-extraction-trigger",
-        "execution_time": "{{ now() }}",
-        "business_id": "{{ inputs.business_id }}",
-        "competitors_processed": {{ outputs.find_competitors_for_business.rows | length }},
-        "triggered_by": "social_media_completion",
-        "inputs": {
-          "business_id": "{{ inputs.business_id }}",
-          "triggered_by": "social_media_extraction_completion",
-          "max_concurrent_analysis": 2,
-          "wait_timeout_minutes": 30
-        }
+        "update_db": {{ inputs.update_db }}{% if inputs.competitor_ids is not empty %},
+        "competitor_ids": {{ inputs.competitor_ids | json }}{% endif %}
       }
-    timeout: "PT30S"
+    timeout: "PT120S"
 
-  - id: log_instagram_trigger_result
+  - id: process_extraction_response
     type: io.kestra.plugin.scripts.python.Script
     containerImage: python:3.11-alpine
     script: |
       import json
       
-      # Check the response from triggering Instagram analysis
-      trigger_response = {{ outputs.trigger_instagram_analysis }}
+      # Check the response from the social media extraction
+      extraction_response = {{ outputs.trigger_social_media_extraction }}
       business_id = "{{ inputs.business_id }}"
       
-      print("📱 Instagram Analysis Trigger Result:")
-      print(f"Business ID: {business_id}")
-      print(f"Status Code: {trigger_response.get('code', 'Unknown')}")
+      print(f"🔍 Social media extraction response for business {business_id}:")
+      print(f"Status Code: {extraction_response.get('code', 'Unknown')}")
       
       # Parse response body
-      body = trigger_response.get('body', {})
+      body = extraction_response.get('body', {})
       if isinstance(body, str):
           try:
               body = json.loads(body)
@@ -395,14 +68,56 @@ tasks:
       print(f"Response Body: {json.dumps(body, indent=2)}")
       
       # Check if successful
-      status_code = trigger_response.get('code', 500)
-      if status_code in [200, 201, 202]:
-          print("✅ Instagram analysis pipeline triggered successfully")
-          execution_id = body.get('id', 'Unknown') if isinstance(body, dict) else 'Unknown'
-          print(f"📋 Instagram Analysis Execution ID: {execution_id}")
+      status_code = extraction_response.get('code', 500)
+      if status_code in [200, 202]:
+          print("✅ Social media extraction successfully triggered")
+          
+          task_id = body.get('task_id', 'Unknown') if isinstance(body, dict) else 'Unknown'
+          print(f"📋 Main Task ID: {task_id}")
+          
+          # Get results info
+          results = body.get('results', {}) if isinstance(body, dict) else {}
+          total_competitors = results.get('total_competitors', 0)
+          queued_tasks = results.get('queued_tasks', 0)
+          failed_to_queue = results.get('failed_to_queue', 0)
+          
+          print(f"📊 Summary:")
+          print(f"   Total competitors: {total_competitors}")
+          print(f"   Tasks queued: {queued_tasks}")
+          print(f"   Failed to queue: {failed_to_queue}")
+          
+          # Store success info
+          result = {
+              "success": True,
+              "business_id": business_id,
+              "main_task_id": task_id,
+              "status_code": status_code,
+              "total_competitors": total_competitors,
+              "queued_tasks": queued_tasks,
+              "failed_to_queue": failed_to_queue,
+              "message": "Social media extraction started successfully"
+          }
+          
       else:
-          print(f"⚠️ Instagram analysis trigger returned: {status_code}")
-          print(f"This might be normal if no Instagram competitors were found")
+          print(f"❌ Failed to trigger social media extraction")
+          print(f"Error details: {body}")
+          
+          # Store error info
+          result = {
+              "success": False,
+              "business_id": business_id,
+              "status_code": status_code,
+              "error": body,
+              "message": "Failed to trigger social media extraction"
+          }
+      
+      # Write result to file
+      with open('/tmp/extraction_result.json', 'w') as f:
+          json.dump(result, f, indent=2)
+          
+      print(f"Result: {json.dumps(result, indent=2)}")
+    outputFiles:
+      - "/tmp/extraction_result.json"
 
 triggers:
   - id: webhook_trigger_by_business

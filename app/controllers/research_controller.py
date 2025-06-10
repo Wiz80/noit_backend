@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 from typing import Dict, Any, Optional
 from dotenv import load_dotenv
+import httpx
 
 from app.models.business.business_understanding.state_of_art import ResearchTask, StatusEnum, ResearchTypeEnum, MarketStateOfArt
 from app.models.business.business_idea import BusinessIdea
@@ -11,8 +12,8 @@ from app.models.business.competitive_analysis.business_competitor import Competi
 from app.services.storage.minio_service import MinioService
 from app.api import deps
 from app.controllers.business_understanding.state_of_art import StateOfArtController
-
 from app.core.config import settings
+
 load_dotenv()
 
 # Configure logging
@@ -123,9 +124,17 @@ class ResearchController:
                     db=db
                 )
                 
+                # After successfully processing competitor data, trigger Kestra workflow
+                try:
+                    await self._trigger_kestra_social_media_extraction(business_id, task_id)
+                    logger.info(f"Successfully triggered Kestra social media extraction workflow for business: {business_id}")
+                except Exception as kestra_error:
+                    logger.error(f"Failed to trigger Kestra workflow: {str(kestra_error)}", exc_info=True)
+                    # Don't fail the whole process if Kestra call fails, just log the error
+                
                 return {
                     "status": "success",
-                    "message": "Competitor analysis data forwarded to webhook controller",
+                    "message": "Competitor analysis data processed and Kestra workflow triggered",
                     "request_id": task_id,
                     "business_id": business_id
                 }
@@ -144,3 +153,57 @@ class ResearchController:
                 "status": "error",
                 "message": f"Error processing research callback: {str(e)}"
             }
+    
+    async def _trigger_kestra_social_media_extraction(self, business_id: str, request_id: str) -> None:
+        """
+        Trigger Kestra social media extraction workflow after competitor analysis completion
+        
+        Args:
+            business_id: ID of the business that completed competitor analysis
+            request_id: ID of the original competitor analysis request
+        """
+        logger.info(f"Triggering Kestra social media extraction workflow for business: {business_id}")
+        
+        # Prepare webhook payload
+        webhook_payload = {
+            "event": "business_model_completed",  # Required by Kestra workflow condition
+            "business_id": business_id,
+            "triggered_by": "competitor_analysis_completion",
+            "original_request_id": request_id,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        # Construct Kestra webhook URL
+        kestra_base_url = settings.KESTRA_URL.rstrip('/')
+        webhook_key = "competitor_analysis_trigger"  # Key from the Kestra workflow
+        webhook_url = f"{kestra_base_url}/api/v1/executions/webhook/noit.backend/start-competitor-analysis/{webhook_key}"
+        
+        logger.info(f"Calling Kestra webhook: {webhook_url}")
+        logger.info(f"Payload: {json.dumps(webhook_payload, indent=2)}")
+        
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    webhook_url,
+                    json=webhook_payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "User-Agent": "NoitBackend-ResearchController/1.0"
+                    }
+                )
+                
+                logger.info(f"Kestra webhook response status: {response.status_code}")
+                logger.info(f"Kestra webhook response body: {response.text}")
+                
+                if response.status_code in [200, 201, 202]:
+                    logger.info("✅ Kestra social media extraction workflow triggered successfully")
+                else:
+                    logger.error(f"❌ Kestra webhook call failed with status {response.status_code}: {response.text}")
+                    raise Exception(f"Kestra webhook failed with status {response.status_code}")
+                    
+        except httpx.TimeoutException:
+            logger.error("⏰ Timeout calling Kestra webhook")
+            raise Exception("Timeout calling Kestra webhook")
+        except Exception as e:
+            logger.error(f"💥 Error calling Kestra webhook: {str(e)}")
+            raise

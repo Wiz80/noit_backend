@@ -9,6 +9,7 @@ from app.services.storage.minio_service import MinioService
 from sqlalchemy.orm import Session
 from app.models.business.competitive_analysis.instagram import InstagramPostInfo, InstagramPostImage, InstagramImageColor, InstagramUserInfo
 from datetime import datetime
+from app.core.config import settings
 
 class InstagramImageAnalyzer:
     """

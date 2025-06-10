@@ -25,6 +25,7 @@ from app.services.business.competitive_analysis.instagram.comments.instagram_sen
 from app.services.business.competitive_analysis.instagram.instagram_scraper import InstagramScraper
 from app.services.search.dynamic_research_ai import ResearchModule, ResearchConfig
 from app.prompts.business.prompts_business_competitors import create_validation_competitor_prompt
+from app.models.user import User
 
 # Import TaskIQ task
 from app.tasks.instagram_analysis_tasks import run_instagram_full_analysis_task
@@ -50,13 +51,10 @@ class AnalysisProgressResponse(BaseModel):
     status: str
     results: Optional[dict]
 
-# Schema for competitor analysis request
+# Schema for competitor analysis request - simplified since we're targeting one competitor
 class CompetitorAnalysisRequest(BaseModel):
-    competitors_ids: Optional[List[str]] = None
-    
-    def get_competitor_ids(self):
-        """Return the competitor IDs, using competitors_ids as fallback if competitor_ids is None"""
-        return self.competitors_ids or None
+    # Remove competitor_ids since we'll get the competitor_id from the URL
+    pass
 
 # Schema for comment analysis request
 class CommentAnalysisRequest(BaseModel):
@@ -82,24 +80,24 @@ class ResearchCallbackRequest(BaseModel):
     task_id: Optional[str] = None
     research_results: dict
 
-@router.post("/{business_id}", response_model=AnalysisResponse)
+@router.post("/{business_id}/competitor/{competitor_id}", response_model=AnalysisResponse)
 async def start_instagram_competitor_analysis(
     business_id: UUID,
+    competitor_id: str,
     request: CompetitorAnalysisRequest,
     background_tasks: BackgroundTasks,
     results_limit: int = 10,
     max_comments: int = 5,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
 ):
     """
-    Start Instagram competitor analysis for a specific business_id using TaskIQ.
-    Allows filtering specific competitors by providing their IDs in the request body.
+    Start Instagram competitor analysis for a specific competitor using TaskIQ.
     
     Args:
         business_id: UUID of the business idea
-        request: Request body containing:
-            - competitor_ids: Optional list of competitor IDs to analyze. If not provided or empty,
-              all competitors for the business will be analyzed.
+        competitor_id: ID of the specific competitor to analyze
+        request: Request body (currently empty but kept for potential future parameters)
         background_tasks: FastAPI background tasks (not used with TaskIQ)
         results_limit: Maximum number of posts to extract per Instagram account (default: 10)
         max_comments: Maximum number of comments to extract per post (default: 5)
@@ -110,90 +108,144 @@ async def start_instagram_competitor_analysis(
     """
     try:
         # Verify if business_id exists
-        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
+        business = db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first()
+        if not business:
             raise HTTPException(status_code=404, detail="Business idea not found")
 
-        # Check if there are competitors with Instagram URLs
-        competitors_query = db.query(Competitor).filter(
+        # Get the specific competitor and verify it belongs to this business
+        competitor = db.query(Competitor).filter(
+            Competitor.id == competitor_id,
             Competitor.business_idea_id == str(business_id)
-        )
+        ).first()
         
-        # Filter by competitor_ids if provided
-        if request.competitors_ids:
-            competitors_query = competitors_query.filter(
-                Competitor.id.in_(request.competitors_ids)
+        if not competitor:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Competitor with ID {competitor_id} not found for business {business_id}"
             )
             
-        competitors = competitors_query.all()
-
-        if not competitors:
-            raise HTTPException(status_code=404, detail="No competitors found with the specified criteria")
-            
-        # Verify that the competitors have Instagram URLs
-        valid_competitors = [c for c in competitors if c.instagram_url]
-        if not valid_competitors:
-            raise HTTPException(status_code=404, detail="None of the selected competitors have Instagram URLs")
-            
-        # If only some competitors have Instagram URLs, log a warning
-        if len(valid_competitors) < len(competitors):
-            logging.warning(f"{len(competitors) - len(valid_competitors)} competitors without Instagram URLs will be skipped")
-
-        # Generate a unique task ID
-        task_id = str(uuid.uuid4())
+        # Verify that the competitor has an Instagram URL
+        if not competitor.instagram_url:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Competitor '{competitor.competitor_name}' does not have an Instagram URL"
+            )
         
-        # Get progress service
+        # Verify if a task is already running or finished for this competitor
         progress_service = get_task_progress_service()
         
-        # Initialize progress in Redis
+        # First check if there's any existing task using competitor_id as key
+        existing_task_progress = progress_service.get_task_progress(competitor_id)
+        
+        if existing_task_progress:
+            task_status = existing_task_progress.get("status")
+            existing_task_id = existing_task_progress.get("task_id")
+            
+            logger.info(f"🔍 Found existing task for competitor {competitor.competitor_name}: {existing_task_id} with status: {task_status}")
+            
+            # Handle different existing task statuses
+            # Get the actual task_id from metadata if available
+            actual_task_id = existing_task_progress.get("actual_task_id", existing_task_id)
+            
+            if task_status == "processing":
+                logger.info(f"⏳ Task {actual_task_id} is still processing for competitor '{competitor.competitor_name}'")
+                return AnalysisResponse(
+                    task_id=actual_task_id,
+                    message=f"Task is already in progress for competitor '{competitor.competitor_name}'. Task ID: {actual_task_id}",
+                    status="processing"
+                )
+            
+            elif task_status == "completed":
+                logger.info(f"✅ Task {actual_task_id} already completed for competitor '{competitor.competitor_name}'")
+                return AnalysisResponse(
+                    task_id=actual_task_id,
+                    message=f"Analysis already completed for competitor '{competitor.competitor_name}'. Task ID: {actual_task_id}",
+                    status="completed"
+                )
+            
+            elif task_status == "queued":
+                logger.info(f"🕒 Task {actual_task_id} is queued for competitor '{competitor.competitor_name}'")
+                return AnalysisResponse(
+                    task_id=actual_task_id,
+                    message=f"Task is already queued for competitor '{competitor.competitor_name}'. Task ID: {actual_task_id}",
+                    status="queued"
+                )
+            
+            elif task_status in ["failed", "cancelled", "error"]:
+                logger.warning(f"❌ Previous task {actual_task_id} failed/cancelled for competitor '{competitor.competitor_name}'. Creating new task...")
+                # Clean up the failed task progress and continue to create a new one
+                progress_service.delete_task_progress(competitor_id)
+            
+            else:
+                logger.warning(f"⚠️ Unknown task status '{task_status}' for competitor '{competitor.competitor_name}'. Creating new task...")
+                # Clean up unknown status and continue
+                progress_service.delete_task_progress(competitor_id)
+
+        # Generate a unique task ID for new task
+        task_id = str(uuid.uuid4())
+        
+        logger.info(f"🆕 Creating new task {task_id} for competitor '{competitor.competitor_name}'")
+        
+        # Initialize progress in Redis using competitor_id as key for consistency
         progress_service.set_task_progress(
-            task_id=task_id,
+            task_id=competitor_id,  # Use competitor_id as key for easier lookup
             progress=0,
             status="queued"
         )
+        
+        # Add additional metadata using update_task_progress
+        progress_service.update_task_progress(competitor_id, {
+            "actual_task_id": task_id,
+            "competitor_id": competitor_id,
+            "competitor_name": competitor.competitor_name,
+            "business_id": str(business_id),
+            "instagram_url": competitor.instagram_url
+        })
 
-        # Send task to TaskIQ queue instead of running directly
+        # Send task to TaskIQ queue for the specific competitor
         try:
             taskiq_task = await run_instagram_full_analysis_task.kiq(
                 business_id=str(business_id),
                 task_id=task_id,
-                competitor_ids=request.competitors_ids,
+                competitor_ids=[competitor_id],  # Pass only this competitor
                 results_limit=results_limit,
                 max_comments=max_comments
             )
             
-            logger.info(f"📤 TaskIQ task queued with ID: {taskiq_task.task_id} for Instagram analysis")
+            logger.info(f"📤 TaskIQ task queued with ID: {taskiq_task.task_id} for Instagram analysis of competitor {competitor.competitor_name}")
             
             # Update progress to indicate task was queued and store TaskIQ task ID
-            progress_service.update_task_progress(task_id, {
+            progress_service.update_task_progress(competitor_id, {
                 "status": "queued",
-                "taskiq_task_id": taskiq_task.task_id
+                "taskiq_task_id": taskiq_task.task_id,
+                "actual_task_id": task_id,
+                "competitor_id": competitor_id,
+                "competitor_name": competitor.competitor_name,
+                "instagram_url": competitor.instagram_url,
+                "business_id": str(business_id)
             })
             
         except Exception as e:
             logger.error(f"❌ Failed to queue TaskIQ task: {str(e)}")
-            progress_service.set_task_failed(task_id, f"Failed to queue task: {str(e)}")
+            progress_service.set_task_failed(competitor_id, f"Failed to queue task: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Failed to queue Instagram analysis task: {str(e)}")
 
-        # Add details about skipped competitors if any were filtered out
-        skipped_message = ""
-        if len(valid_competitors) < len(competitors):
-            skipped_count = len(competitors) - len(valid_competitors)
-            skipped_message = f" ({skipped_count} competitors were skipped due to missing Instagram URLs)"
-
         return AnalysisResponse(
-            task_id=task_id,
-            message=f"Instagram competitor analysis queued successfully{skipped_message}",
+            task_id=task_id,  # Return the actual task_id (UUID), not competitor_id
+            message=f"Instagram analysis queued successfully for competitor '{competitor.competitor_name}'",
             status="queued"
         )
 
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except Exception as e:
         # If there was a task_id created, update its status
-        if 'task_id' in locals():
+        if 'task_id' in locals() and 'competitor_id' in locals():
             progress_service = get_task_progress_service()
-            progress_service.set_task_failed(task_id, str(e))
+            progress_service.set_task_failed(competitor_id, str(e))
         
         raise HTTPException(status_code=500, detail=str(e))
-    
 
 @router.get("/{business_id}/task/{task_id}", response_model=AnalysisProgressResponse)
 async def get_instagram_analysis_progress(

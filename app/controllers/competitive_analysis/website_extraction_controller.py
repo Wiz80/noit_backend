@@ -34,7 +34,7 @@ class WebsiteExtractionController:
             llm_provider="openai",
             llm_model="gpt-4o-mini",
             api_key=os.getenv("OPENAI_API_KEY"),
-            headless=False,
+            headless=True,
             verbose=True
         )
     
@@ -58,7 +58,25 @@ class WebsiteExtractionController:
             return social_media_info
             
         except Exception as e:
-            logger.error(f"Error extrayendo redes sociales del sitio web {website_url}: {str(e)}")
+            error_message = str(e).lower()
+            
+            # Check for critical errors that should be propagated
+            critical_errors = [
+                "executable doesn't exist",
+                "browsertype.launch",
+                "playwright",
+                "chromium",
+                "connection refused",
+                "network is unreachable"
+            ]
+            
+            # If it's a critical error, propagate it
+            if any(critical_error in error_message for critical_error in critical_errors):
+                logger.error(f"❌ Critical error extracting social media from {website_url}: {str(e)}")
+                raise Exception(f"Critical scraping error: {str(e)}")
+            
+            # For non-critical errors, log and return empty result
+            logger.warning(f"⚠️ Non-critical error extracting social media from {website_url}: {str(e)}")
             return self.website_social_scraper._get_empty_result()
     
     @staticmethod

@@ -1,7 +1,7 @@
 from pydantic_settings import BaseSettings
 import os
 from dotenv import load_dotenv
-from typing import Optional
+from typing import Optional, AnyHttpUrl
 
 load_dotenv()
 
@@ -11,8 +11,9 @@ class Settings(BaseSettings):
     
     # JWT
     SECRET_KEY: str = os.getenv("SECRET_KEY")
+    SUPERUSER_SECRET_KEY: str = "another_very_secret_key"
     ALGORITHM: str = os.getenv("ALGORITHM")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
     
     # Database
     POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER")
@@ -33,8 +34,14 @@ class Settings(BaseSettings):
     REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    
+    # Kestra
+    KESTRA_URL: str = os.getenv("KESTRA_URL", "http://localhost:8080/")
 
     SQLALCHEMY_DATABASE_URI: str | None = None
+    
+    SERVER_NAME: str = "localhost"
+    SERVER_HOST: AnyHttpUrl = "http://localhost:8000"
     
     @property
     def get_database_url(self) -> str:

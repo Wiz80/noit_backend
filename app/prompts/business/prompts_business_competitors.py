@@ -27,31 +27,53 @@ def parse_json_with_llm(lang, raw_response):
 
 
 def create_parsing_prompt_competitors(lang, raw_response):
+    competitors_count = raw_response.count('"name"') + raw_response.count("'name'") + raw_response.count('name')
+    
     if lang == 'es':
         return f"""
-        Convierte esta respuesta en un JSON válido:
+        Convierte esta respuesta en un JSON válido y COMPLETO:
         
-        Requisitos:
-        - Usar keys del inglés
-        - Validar URLs
+        CRÍTICO - MANTENER TODOS LOS DATOS:
+        - OBLIGATORIO: Conservar TODOS los competidores del listado original
+        - He detectado aproximadamente {competitors_count} competidores en el texto
+        - NO truncar, cortar o limitar la cantidad de competidores
+        - Si hay 15 competidores en la entrada, DEBES devolver los 15
+        
+        Requisitos técnicos:
+        - Usar keys en inglés exactamente como se especifica
+        - Convertir nombres de campos según el mapeo requerido
+        - Validar URLs correctamente
         - Asegurar scores entre 1-100
+        - Manejar valores null apropiadamente
+        
+        MAPEO DE CAMPOS OBLIGATORIO:
+        - "name" → "competitor_name"
+        - "valueProposition" → "key_feature" 
+        - "websiteUrl" → "website"
+        - "socialMedia.instagram" → "instagram_url"
+        - "socialMedia.facebook" → "facebook_url"
+        - "socialMedia.linkedin" → "linkedin_url"
+        - "socialMedia.twitter" → "x_url"
+        - "socialMedia.youtube" → "youtube_url"
+        - "socialMedia.tiktok" → "tiktok_url"
+        - "similarityScore" → "similarity_score"
         
         Respuesta original:
         {raw_response}
         
-        Formato requerido:
+        Formato requerido (TODOS los competidores):
         {{
             "competitors": [
             {{
-                "full_name": "string",
+                "competitor_name": "string",
                 "key_feature": "string",
                 "website": "url",
-                "instagram_url": "handle",
-                "facebook_url": "handle",
-                "linkedin_url": "handle",
-                "x_url": "handle",
-                "youtube_url": "handle",
-                "tiktok_url": "handle",
+                "instagram_url": "url o null",
+                "facebook_url": "url o null",
+                "linkedin_url": "url o null",
+                "x_url": "url o null",
+                "youtube_url": "url o null",
+                "tiktok_url": "url o null",
                 "similarity_score": number
             }}
             ]
@@ -59,36 +81,57 @@ def create_parsing_prompt_competitors(lang, raw_response):
 
         IMPORTANTE:
         - Devuelve ÚNICAMENTE el JSON sin comentarios
+        - CONSERVA TODOS los competidores (NO menos de {max(1, competitors_count-2)})
         - Asegura que similarity_score sea número
-        - Valida que las URLs sean correctas
-        - Asegurate que los keys del json estén en inglés
+        - Valida que las URLs sean correctas o null
+        - Asegurate que los keys del json estén exactamente como se especifica
         
         """
     else:
         return f"""
-        Convert this response into valid JSON:
+        Convert this response into valid and COMPLETE JSON:
         
-        Requirements:
-        - Use English keys
-        - Validate URLs
+        CRITICAL - MAINTAIN ALL DATA:
+        - MANDATORY: Preserve ALL competitors from the original list
+        - I detected approximately {competitors_count} competitors in the text
+        - DO NOT truncate, cut, or limit the number of competitors
+        - If there are 15 competitors in input, you MUST return all 15
+        
+        Technical requirements:
+        - Use English keys exactly as specified
+        - Convert field names according to required mapping
+        - Validate URLs correctly
         - Ensure scores 1-100
+        - Handle null values appropriately
+        
+        MANDATORY FIELD MAPPING:
+        - "name" → "competitor_name"
+        - "valueProposition" → "key_feature"
+        - "websiteUrl" → "website"
+        - "socialMedia.instagram" → "instagram_url"
+        - "socialMedia.facebook" → "facebook_url"
+        - "socialMedia.linkedin" → "linkedin_url"
+        - "socialMedia.twitter" → "x_url"
+        - "socialMedia.youtube" → "youtube_url"
+        - "socialMedia.tiktok" → "tiktok_url"
+        - "similarityScore" → "similarity_score"
         
         Original response:
         {raw_response}
         
-        Required format:
+        Required format (ALL competitors):
         {{
             "competitors": [
             {{
-                "full_name": "string",
+                "competitor_name": "string",
                 "key_feature": "string",
                 "website": "url",
-                "instagram_url": "handle",
-                "facebook_url": "handle",
-                "linkedin_url": "handle",
-                "x_url": "handle",
-                "youtube_url": "handle",
-                "tiktok_url": "handle",
+                "instagram_url": "url or null",
+                "facebook_url": "url or null",
+                "linkedin_url": "url or null",
+                "x_url": "url or null",
+                "youtube_url": "url or null",
+                "tiktok_url": "url or null",
                 "similarity_score": number
             }}
             ]
@@ -96,14 +139,16 @@ def create_parsing_prompt_competitors(lang, raw_response):
 
         IMPORTANT:
         - Return ONLY the JSON without comments
+        - PRESERVE ALL competitors (NO less than {max(1, competitors_count-2)})
         - Ensure that similarity_score is a number
-        - Validate that the URLs are correct
+        - Validate that URLs are correct or null
+        - Ensure keys are exactly as specified
         """
     
 
 def create_competitor_details_query(lang, business_details, competitor: Dict) -> str:
     """Crea el prompt para buscar detalles específicos de un competidor"""
-    competitor_name = competitor.get('full_name', '')
+    competitor_name = competitor.get('competitor_name', '')
     competitor_website = competitor.get('website', '')
     key_feature = competitor.get('key_feature', '')
     
@@ -215,7 +260,7 @@ def create_research_query(lang, business_details, prompt_search: str) -> str:
         {
         "competitors": [
             {
-            "full_name": "string", # Nombre Completo del Competidor
+            "competitor_name": "string", # Nombre Completo del Competidor
             "key_feature": "string", # Característica principal/clave del competidor (Propuesta de valor)
             "website": "url", # URL del sitio web
             "instagram_url": "handle", # Usuario de Instagram (si está disponible)
@@ -253,7 +298,7 @@ def create_research_query(lang, business_details, prompt_search: str) -> str:
         {
             "competitors": [
                 {
-                "full_name": "string", # Competitor's Full Name
+                "competitor_name": "string", # Competitor's Full Name
                 "key_feature": "string", # Competitor's Key Feature (Value Proposition)
                 "website": "url", # Competitor's Website URL
                 "instagram_url": "handle", # Instagram handle (if available)
@@ -336,7 +381,7 @@ def create_validation_competitor_prompt(lang, competitor_info: Dict) -> str:
         return f"""
         Tienes la tarea de validar/buscar la información de una empresa/startup teniendo un nombre, descripción y un posible sitio web.
 
-        Nombre del competidor: {competitor_info['full_name']}
+        Nombre del competidor: {competitor_info['competitor_name']}
 
         Descripción del competidor: {competitor_info['description']}
 
@@ -350,7 +395,7 @@ def create_validation_competitor_prompt(lang, competitor_info: Dict) -> str:
 
         """ + """
         {
-            "full_name": "string", # Competitor's Full Name
+            "competitor_name": "string", # Competitor's Full Name
             "key_feature": "string", # Competitor's Key Feature (Value Proposition)
             "website": "url", # Competitor's Website URL
             "instagram_url": "handle", # Instagram handle (if available)
@@ -366,7 +411,7 @@ def create_validation_competitor_prompt(lang, competitor_info: Dict) -> str:
         return f"""
         You have the task to validate/search the information of a company/startup having a name, description and a possible website.
 
-        Competitor name: {competitor_info['full_name']}
+        Competitor name: {competitor_info['competitor_name']}
 
         Competitor description: {competitor_info['description']}
 
@@ -380,7 +425,7 @@ def create_validation_competitor_prompt(lang, competitor_info: Dict) -> str:
 
         """ + """
         {
-        "full_name": "string", # Competitor's Full Name
+        "competitor_name": "string", # Competitor's Full Name
         "key_feature": "string", # Competitor's Key Feature (Value Proposition)
         "website": "url", # Competitor's Website URL
         "instagram_url": "handle", # Instagram handle (if available)

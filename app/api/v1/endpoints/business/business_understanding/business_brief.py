@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, BackgroundTasks
 from typing import Dict, List, Optional
 import logging
 import json
 import os
+import httpx
 from datetime import datetime
 from sqlalchemy.orm import Session
 
@@ -30,6 +31,43 @@ from app.models.business.business_understanding.business_model import BusinessMo
 # Configure logger
 logger = logging.getLogger(__name__)
 
+def get_kestra_webhook_url():
+    """Constructs the Kestra webhook URL from environment variables and pipeline configuration."""
+    kestra_base_url = os.getenv("KESTRA_BASE_URL", "http://kestra-webserver:8080")
+    # From pipelines/business-model-advanced-trigger.yml
+    namespace = "noit.backend"
+    flow_id = "start-competitor-analysis"
+    webhook_key = os.getenv("KESTRA_COMPETITOR_SCRAPER_KEY", "ks_wht_a8hJkLp2sQ9fG3rV")
+    return f"{kestra_base_url}/api/v1/executions/webhook/{namespace}/{flow_id}/{webhook_key}"
+
+async def trigger_business_model_completed_webhook(business_id: str):
+    """Triggers a Kestra webhook to start the advanced business model analysis."""
+    webhook_url = get_kestra_webhook_url()
+    payload = {
+        "event": "business_model_completed",
+        "business_id": business_id
+    }
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            logger.info(f"Triggering Kestra webhook for business model completion: {webhook_url}")
+            response = await client.post(webhook_url, json=payload, timeout=30.0)
+            
+            if response.status_code >= 400:
+                logger.error(
+                    f"Error triggering Kestra webhook for business {business_id}. "
+                    f"Status: {response.status_code}, Response: {response.text}"
+                )
+            else:
+                logger.info(
+                    f"Kestra webhook for business {business_id} triggered successfully. "
+                    f"Execution ID: {response.json().get('executionId')}"
+                )
+    except httpx.RequestError as e:
+        logger.error(f"RequestError while triggering Kestra webhook for business {business_id}: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error while triggering Kestra webhook for business {business_id}: {str(e)}")
+
 router = APIRouter()
 
 # -----------------------------------------------------------------------------
@@ -37,6 +75,7 @@ router = APIRouter()
 # -----------------------------------------------------------------------------
 @router.post("/business/{business_id}/brief/chat", response_model=BriefMessageResponse)
 async def process_brief_message(
+    background_tasks: BackgroundTasks,
     business_id: str = Path(..., description="ID del negocio"),
     request: BriefMessageRequest = None,
     redis_service: RedisChatService = Depends(deps.get_redis_service),
@@ -175,6 +214,9 @@ async def process_brief_message(
                 
                 db.commit()
                 logger.info(f"Business model saved successfully after ETAPA 1 completion")
+                
+                # Trigger Kestra webhook in the background
+                background_tasks.add_task(trigger_business_model_completed_webhook, business_id)
                 
             except Exception as e:
                 logger.error(f"Error saving business model after ETAPA 1: {str(e)}")

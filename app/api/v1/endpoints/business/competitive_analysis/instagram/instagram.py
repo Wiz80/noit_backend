@@ -14,6 +14,7 @@ import logging
 import os
 from dotenv import load_dotenv
 
+from app.api import deps
 from app.api.deps import get_db
 from app.models.business.business_idea import BusinessIdea
 from app.models.business.competitive_analysis.competitors import Competitor

@@ -202,6 +202,7 @@ taskiq = "^0.11.17"
 taskiq-redis = "^1.0.0"
 # Gunicorn for production-ready WSGI server
 gunicorn = "^23.0.0"
+google-auth = {extras = ["pyjwt"], version = "^2.40.3"}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

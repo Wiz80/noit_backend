@@ -2076,19 +2076,21 @@ grpcio-gcp = ["grpcio-gcp (>=0.2.2,<1.0.dev0)"]
 
 [[package]]
 name = "google-auth"
-version = "2.40.2"
+version = "2.40.3"
 description = "Google Authentication Library"
 optional = false
 python-versions = ">=3.7"
 groups = ["main"]
 files = [
-    {file = "google_auth-2.40.2-py2.py3-none-any.whl", hash = "sha256:f7e568d42eedfded58734f6a60c58321896a621f7c116c411550a4b4a13da90b"},
-    {file = "google_auth-2.40.2.tar.gz", hash = "sha256:a33cde547a2134273226fa4b853883559947ebe9207521f7afc707efbf690f58"},
+    {file = "google_auth-2.40.3-py2.py3-none-any.whl", hash = "sha256:1370d4593e86213563547f97a92752fc658456fe4514c809544f330fed45a7ca"},
+    {file = "google_auth-2.40.3.tar.gz", hash = "sha256:500c3a29adedeb36ea9cf24b8d10858e152f2412e3ca37829b3fa18e33d63b77"},
 ]
 
 [package.dependencies]
 cachetools = ">=2.0.0,<6.0"
+cryptography = {version = ">=38.0.3", optional = true, markers = "extra == \"pyjwt\""}
 pyasn1-modules = ">=0.2.1"
+pyjwt = {version = ">=2.0", optional = true, markers = "extra == \"pyjwt\""}
 rsa = ">=3.1.4,<5"
 
 [package.extras]
@@ -8851,4 +8853,4 @@ cffi = ["cffi (>=1.11)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.13"
-content-hash = "1670bff1f3942aa24d6f2cb715a4ad435223861e94ea0905afa2f461155f7472"
+content-hash = "19ae5bc92aea595d83bb35140683790071f14f8d2bb6667e0f258795f6199795"

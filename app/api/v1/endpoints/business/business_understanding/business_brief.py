@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 def get_kestra_webhook_url():
     """Constructs the Kestra webhook URL from environment variables and pipeline configuration."""
-    kestra_base_url = os.getenv("KESTRA_BASE_URL", "http://kestra-webserver:8080")
+    kestra_base_url = os.getenv("KESTRA_BASE_URL", "http://kestra:8080")
     # From pipelines/business-model-advanced-trigger.yml
     namespace = "noit.backend"
     flow_id = "start-competitor-analysis"
@@ -102,10 +102,10 @@ async def process_brief_message(
             )
         
         # Validate LLM model if provided
-        llm_model = request.llm_model or "claude-3-5-sonnet-20241022"
+        llm_model = request.llm_model or "gpt-4o-mini"
         if not validate_llm_model(llm_model):
             logger.warning(f"Invalid LLM model {llm_model}, using default")
-            llm_model = "claude-3-5-sonnet-20241022"
+            llm_model = "gpt-4o-mini"
         
         # Initialize the brief agent service with configured LLM
         brief_service = BriefAgentService(

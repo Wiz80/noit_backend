@@ -49,7 +49,7 @@ class InternalCompetitorAnalysisRequest(BaseModel):
     validator_model: str = "openai:gpt-4o-mini"
     research_model: str = "sonar-deep-research"
     search_prompt: str = "Análisis detallado de competidores"
-    base_url: str = "http://host.docker.internal:8000"
+    base_url: str = "http://app:8000"
     triggered_by: str = "internal_automation"
 
 @router.post("/{business_id}")

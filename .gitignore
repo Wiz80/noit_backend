@@ -21,3 +21,5 @@ __pycache__
 postgres_data/
 
 certbot/
+
+pipelines

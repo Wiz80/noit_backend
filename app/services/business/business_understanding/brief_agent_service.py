@@ -54,7 +54,7 @@ class LLMConfig:
     }
     
     @classmethod
-    def create_llm(cls, model_name: str = "claude-3-5-sonnet-20241022", **kwargs):
+    def create_llm(cls, model_name: str = "gpt-4o-mini", **kwargs):
         """
         Create an LLM instance based on the model name
         
@@ -66,8 +66,8 @@ class LLMConfig:
             LLM instance
         """
         if model_name not in cls.PROVIDER_CONFIGS:
-            logger.warning(f"Model {model_name} not found in configurations. Using default claude-3-5-sonnet-20241022")
-            model_name = "claude-3-5-sonnet-20241022"
+            logger.warning(f"Model {model_name} not found in configurations. Using default gpt-4o-mini")
+            model_name = "gpt-4o-mini"
         
         config = cls.PROVIDER_CONFIGS[model_name]
         provider = config["provider"]
@@ -185,7 +185,7 @@ class BriefAgentService:
     
     def __init__(
         self, 
-        llm_model: str = "claude-3-5-sonnet-20241022",
+        llm_model: str = "gpt-4o-mini",
         llm_temperature: float = 0.7,
         llm_max_tokens: int = 4000,
         custom_llm: Optional[Any] = None

@@ -1,7 +1,8 @@
 from pydantic_settings import BaseSettings
+from pydantic import AnyHttpUrl
 import os
 from dotenv import load_dotenv
-from typing import Optional, AnyHttpUrl
+from typing import Optional, List
 
 load_dotenv()
 
@@ -9,9 +10,12 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Business AI API"
     API_V1_STR: str = "/api/v1"
     
+    # Google
+    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID")
+    
     # JWT
     SECRET_KEY: str = os.getenv("SECRET_KEY")
-    SUPERUSER_SECRET_KEY: str = "another_very_secret_key"
+    SUPERUSER_SECRET_KEY: str = os.getenv("SUPERUSER_SECRET_KEY")
     ALGORITHM: str = os.getenv("ALGORITHM")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
     

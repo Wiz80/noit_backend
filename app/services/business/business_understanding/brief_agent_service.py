@@ -203,6 +203,11 @@ class BriefAgentService:
         self.flat_questions = self._flatten_questions()
         self.total_questions = len(self.flat_questions)
         
+        logger.info(f"BriefAgentService initialized with {self.total_questions} questions")
+        logger.info(f"Questions breakdown by phase:")
+        for phase, questions in self.phases.items():
+            logger.info(f"  {phase}: {len(questions)} questions")
+        
         # Configure LLM
         if custom_llm:
             self.llm = custom_llm
@@ -669,6 +674,7 @@ Comenzemos con la primera pregunta:
                 business_model_mapping = self.map_etapa1_to_business_model(answers)
         
         if next_index >= len(self.flat_questions):
+            logger.info(f"Brief completion triggered: next_index={next_index}, total_questions={len(self.flat_questions)}")
             completion_result = self._handle_completion(answers, chat_history + [{"role": "user", "content": message}])
             if business_model_mapping:
                 completion_result["business_model_mapping"] = business_model_mapping
@@ -782,6 +788,11 @@ Ahora continuaremos con la siguiente fase:"""
     
     def _handle_completion(self, answers: Dict, chat_history: List) -> Dict[str, Any]:
         """Handle brief completion"""
+        
+        logger.info(f"Handling brief completion - Total phases answered: {len(answers)}")
+        logger.info(f"Phases structure: {list(answers.keys())}")
+        total_answered_questions = sum(len(phase_answers) for phase_answers in answers.values())
+        logger.info(f"Total questions answered: {total_answered_questions}/{self.total_questions}")
         
         completion_msg = """🎉 ¡Felicitaciones! Has completado todo el proceso de Brief.
 
@@ -925,9 +936,13 @@ El brief está completo y guardado en tu sesión."""
             business_model_mapping: Mapped business model data from ETAPA 1
         """
         try:
-            kestra_host = os.getenv("KESTRA_HOST", "http://localhost:8080")
+            # Import settings to get the unified Kestra URL
+            from app.core.config import settings
+            
+            kestra_base_url = settings.KESTRA_URL.rstrip('/')
             # Get webhook configuration from environment
-            kestra_webhook_url = f"{kestra_host}/api/v1/executions/webhook/noit.backend/start-competitor-analysis/competitor_analysis_trigger"
+            webhook_key = settings.KESTRA_COMPETITOR_ANALYSIS_KEY
+            kestra_webhook_url = f"{kestra_base_url}/api/v1/executions/webhook/noit.backend/start-competitor-analysis/{webhook_key}"
             
             # Prepare webhook payload
             webhook_payload = {

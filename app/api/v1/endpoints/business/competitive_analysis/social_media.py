@@ -95,48 +95,49 @@ async def extract_social_media_from_websites(
         sub_task_ids = []
         failed_tasks = []
         
-        for competitor in competitors_with_websites:
-            try:
-                # Generate unique task ID for this competitor
-                sub_task_id = str(uuid.uuid4())
-                sub_task_ids.append({
-                    "competitor_id": competitor.id,
-                    "competitor_name": competitor.competitor_name,
-                    "task_id": sub_task_id
-                })
-                
-                # Initialize sub-task progress
-                progress_service.set_task_progress(
-                    task_id=sub_task_id,
-                    progress=0,
-                    status="queued"
-                )
-                
-                # Queue individual TaskIQ task for this competitor
-                taskiq_task = await extract_social_media_from_single_competitor_task.kiq(
-                    business_id=str(business_id),
-                    competitor_id=competitor.id,
-                    task_id=sub_task_id,
-                    update_db=request.update_db
-                )
-                
-                logger.info(f"📤 TaskIQ task queued with ID: {taskiq_task.task_id} for competitor {competitor.competitor_name}")
-                
-                # Update sub-task progress to indicate it was queued
-                progress_service.update_task_progress(sub_task_id, {
-                    "status": "queued",
-                    "taskiq_task_id": taskiq_task.task_id,
-                    "competitor_name": competitor.competitor_name
-                })
-                
-            except Exception as e:
-                logger.error(f"❌ Failed to queue TaskIQ task for competitor {competitor.competitor_name}: {str(e)}")
-                failed_tasks.append({
-                    "competitor_id": competitor.id,
-                    "competitor_name": competitor.competitor_name,
-                    "error": str(e)
-                })
-                progress_service.set_task_failed(sub_task_id, f"Failed to queue task: {str(e)}")
+        for idx, competitor in enumerate(competitors_with_websites):
+            if idx < 2:
+                try:
+                    # Generate unique task ID for this competitor
+                    sub_task_id = str(uuid.uuid4())
+                    sub_task_ids.append({
+                        "competitor_id": competitor.id,
+                        "competitor_name": competitor.competitor_name,
+                        "task_id": sub_task_id
+                    })
+                    
+                    # Initialize sub-task progress
+                    progress_service.set_task_progress(
+                        task_id=sub_task_id,
+                        progress=0,
+                        status="queued"
+                    )
+                    
+                    # Queue individual TaskIQ task for this competitor
+                    taskiq_task = await extract_social_media_from_single_competitor_task.kiq(
+                        business_id=str(business_id),
+                        competitor_id=competitor.id,
+                        task_id=sub_task_id,
+                        update_db=request.update_db
+                    )
+                    
+                    logger.info(f"📤 TaskIQ task queued with ID: {taskiq_task.task_id} for competitor {competitor.competitor_name}")
+                    
+                    # Update sub-task progress to indicate it was queued
+                    progress_service.update_task_progress(sub_task_id, {
+                        "status": "queued",
+                        "taskiq_task_id": taskiq_task.task_id,
+                        "competitor_name": competitor.competitor_name
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to queue TaskIQ task for competitor {competitor.competitor_name}: {str(e)}")
+                    failed_tasks.append({
+                        "competitor_id": competitor.id,
+                        "competitor_name": competitor.competitor_name,
+                        "error": str(e)
+                    })
+                    progress_service.set_task_failed(sub_task_id, f"Failed to queue task: {str(e)}")
 
         # Update main task with sub-task information
         main_task_results = {

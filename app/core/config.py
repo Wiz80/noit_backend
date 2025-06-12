@@ -40,7 +40,10 @@ class Settings(BaseSettings):
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
     
     # Kestra
-    KESTRA_URL: str = os.getenv("KESTRA_URL", "http://localhost:8080/")
+    KESTRA_URL: str = os.getenv("KESTRA_URL", "http://kestra:8080")
+    KESTRA_COMPETITOR_ANALYSIS_KEY: str = os.getenv("KESTRA_COMPETITOR_ANALYSIS_KEY", "ojdfqfuqfjmcaecf")
+    KESTRA_SOCIAL_MEDIA_SCRAPER_KEY: str = os.getenv("KESTRA_SOCIAL_MEDIA_SCRAPER_KEY", "KIWsfd9QHF412@")
+    KESTRA_INSTAGRAM_ANALYSIS_KEY: str = os.getenv("KESTRA_INSTAGRAM_ANALYSIS_KEY", "ajhef013adjaXJSNAScd")
 
     SQLALCHEMY_DATABASE_URI: str | None = None
     

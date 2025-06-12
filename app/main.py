@@ -68,6 +68,11 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 async def root():
     return {"message": "Welcome to Infinity Lab API"}
 
+@app.get("/health", status_code=200)
+async def health_check():
+    """Simple health check endpoint"""
+    return {"status": "ok"}
+
 @app.on_event("startup")
 async def startup_event():
     """

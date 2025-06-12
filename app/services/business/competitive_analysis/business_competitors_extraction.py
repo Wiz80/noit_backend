@@ -125,8 +125,8 @@ class EnhancedBusinessAnalyzer:
     
     def __init__(self, business_model: str, 
                        lang: str = 'es', 
-                       validator_provider: str = 'anthropic', 
-                       validator_model: str = "claude-3-5-sonnet-20241022",
+                       validator_provider: str = 'openai', 
+                       validator_model: str = "gpt-4o-mini",
                        max_depth: int = 3,
                        research_model: str = "sonar-deep-research",
                        db: sessionmaker = SessionLocal):
@@ -138,25 +138,26 @@ class EnhancedBusinessAnalyzer:
 
         # Initialize LLM using LangChain
         try:
+            logger.info(f"Attempting to initialize LLM with provider: {validator_provider}, model: {validator_model}")
             self.llm = create_llm_client(
                 provider=validator_provider,
                 model=validator_model,
                 temperature=0.3
             )
-            logging.info(f"LLM initialized with provider: {validator_provider}, model: {validator_model}")
+            logging.info(f"LLM initialized successfully with provider: {validator_provider}, model: {validator_model}")
         except Exception as e:
-            logging.error(f"Error initializing LLM: {str(e)}")
+            logging.error(f"Error initializing specified LLM ({validator_provider}/{validator_model}): {str(e)}", exc_info=True)
             # Fallback to default anthropic model
             try:
+                logging.info("Attempting to initialize fallback LLM (anthropic)...")
                 self.llm = create_llm_client(
                     provider="anthropic",
                     model="claude-3-5-sonnet-20241022",
                     temperature=0.3,
-                    max_tokens=20000
                 )
                 logging.info("Fallback to default Claude model successful")
             except Exception as fallback_error:
-                logging.error(f"Fallback failed: {str(fallback_error)}")
+                logging.error(f"Fallback LLM initialization failed: {str(fallback_error)}", exc_info=True)
                 raise ValueError(f"Could not initialize any LLM: {fallback_error}")
             
         self.business_model = business_model
@@ -657,7 +658,13 @@ class EnhancedBusinessAnalyzer:
             return {"competitors": []}
     
     def _extract_json(self, raw_string: str) -> str:
-        """Intenta extraer un JSON válido de la respuesta cruda"""
+        """Intenta extraer un JSON válido de la respuesta cruda, incluso si está envuelto en markdown"""
+        # Expresión regular para encontrar un bloque JSON, opcionalmente envuelto en ```json ... ```
+        match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw_string, re.DOTALL)
+        if match:
+            logger.info("Found JSON block wrapped in markdown")
+            return match.group(1)
+        
         try:
             # Buscar el primer { y último } válidos
             start = raw_string.index('{')
@@ -671,11 +678,16 @@ class EnhancedBusinessAnalyzer:
         # List to store created competitors
         created_competitors = []
         
-        for competitor_info in competitors_data['competitors']:
+        competitors_list = competitors_data.get('competitors', [])
+        logger.info(f"Attempting to save {len(competitors_list)} competitors to the database for business_id: {business_idea_id}")
+
+        for i, competitor_info in enumerate(competitors_list):
             try:
                 # Handle different possible field names for competitor name
                 competitor_name = competitor_info.get("competitor_name", "Unknown Competitor")
                 
+                logger.info(f"Processing competitor #{i+1}: {competitor_name}")
+
                 # Create Competitor object
                 competitor = Competitor(
                     business_idea_id=business_idea_id,
@@ -694,16 +706,21 @@ class EnhancedBusinessAnalyzer:
                 # Add to session
                 self.db_session.add(competitor)
                 created_competitors.append(competitor)
+                logger.info(f"Successfully staged competitor '{competitor_name}' for saving.")
                 
             except Exception as e:
-                logger.error(f"Error saving competitor {competitor_info}: {str(e)}")
+                logger.error(f"Error processing competitor data: {competitor_info}", exc_info=True)
+                logger.error(f"Error saving competitor #{i+1}: {str(e)}")
                 # Continue with the next competitor instead of failing completely
                 continue
         
-        # Commit to store competitors at the same time - remove await since this is a synchronous session
+        # Commit to store competitors at the same time
         try:
+            logger.info(f"Committing {len(created_competitors)} competitors to the database...")
             self.db_session.commit()
+            logger.info("Successfully committed competitors to the database.")
         except Exception as e:
+            logger.error("Failed to commit competitors to the database.", exc_info=True)
             logger.error(f"Error committing competitors to database: {str(e)}")
             self.db_session.rollback()
             raise

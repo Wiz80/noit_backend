@@ -46,7 +46,7 @@ class InternalCompetitorAnalysisRequest(BaseModel):
     business_id: str
     language: str = "es"
     validator_provider: str = "openai"
-    validator_model: str = "openai:gpt-4o-mini"
+    validator_model: str = "gpt-4o-mini"
     research_model: str = "sonar-deep-research"
     search_prompt: str = "Análisis detallado de competidores"
     base_url: str = "http://app:8000"
@@ -175,7 +175,7 @@ async def analyze_competitors(
             logger.info(f"Created new research record with ID {request_id} for business {business_id} (triggered by {request.triggered_by})")
         
         # Create callback URL for research completion
-        callback_url = f"{request.base_url}/api/v1/webhooks/research-callback/{request_id}"
+        callback_url = f"{request.base_url}/api/v1/webhooks/competitor-analysis-callback/{request_id}"
         
         # Initialize MinIO service for questions storage
         minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)

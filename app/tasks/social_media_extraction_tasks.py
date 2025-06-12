@@ -8,16 +8,17 @@ from .broker import broker
 from app.controllers.competitive_analysis.website_extraction_controller import WebsiteExtractionController
 from app.db.session import SessionLocal
 from app.services.cache.task_progress_service import get_task_progress_service
+from app.core.config import settings
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 async def trigger_instagram_analysis_webhook(business_id: str, competitor_id: str):
     """Triggers a Kestra webhook to start the full Instagram analysis for a single competitor."""
-    kestra_base_url = os.getenv("KESTRA_BASE_URL", "http://kestra:8080")
+    kestra_base_url = settings.KESTRA_URL.rstrip('/')
     namespace = "noit.backend"
     flow_id = "instagram-competitor-full-analysis"
-    webhook_key = os.getenv("KESTRA_INSTAGRAM_ANALYSIS_KEY", "ks_wht_qW1eR4tY6uI8oP0a")
+    webhook_key = settings.KESTRA_INSTAGRAM_ANALYSIS_KEY
     
     webhook_url = f"{kestra_base_url}/api/v1/executions/webhook/{namespace}/{flow_id}/{webhook_key}"
     
@@ -255,7 +256,7 @@ async def extract_social_media_from_single_competitor_task(
         logger.info(f"✅ Social media extraction task completed for competitor {competitor_id}, task {task_id}")
         
         # Check if an Instagram URL was found before triggering the next workflow
-        if competitor_result.get("social_media_links", {}).get("instagram"):
+        if competitor_result.get("social_media", {}).get("instagram", {}).get("url"):
             logger.info(f"Instagram URL found for {competitor_id}. Triggering full Instagram analysis workflow.")
             await trigger_instagram_analysis_webhook(business_id=business_id, competitor_id=competitor_id)
         else:

@@ -27,17 +27,18 @@ from app.schemas.business.business_brief import (
 from app.models.user import User
 from app.models.business.business_idea import BusinessIdea
 from app.models.business.business_understanding.business_model import BusinessModel
+from app.core.config import settings
 
 # Configure logger
 logger = logging.getLogger(__name__)
 
 def get_kestra_webhook_url():
     """Constructs the Kestra webhook URL from environment variables and pipeline configuration."""
-    kestra_base_url = os.getenv("KESTRA_BASE_URL", "http://kestra:8080")
-    # From pipelines/business-model-advanced-trigger.yml
+    kestra_base_url = settings.KESTRA_URL.rstrip('/')
+    # From pipelines/competitor_search.yml
     namespace = "noit.backend"
     flow_id = "start-competitor-analysis"
-    webhook_key = os.getenv("KESTRA_COMPETITOR_SCRAPER_KEY", "ks_wht_a8hJkLp2sQ9fG3rV")
+    webhook_key = settings.KESTRA_COMPETITOR_ANALYSIS_KEY
     return f"{kestra_base_url}/api/v1/executions/webhook/{namespace}/{flow_id}/{webhook_key}"
 
 async def trigger_business_model_completed_webhook(business_id: str):
@@ -259,6 +260,10 @@ async def process_brief_message(
         # Handle session completion
         if result["session_finished"]:
             try:
+                logger.info(f"Brief session finished detected for business {business_id}")
+                logger.info(f"Total answers collected: {len(result['updated_answers'])}")
+                logger.info(f"Answers structure: {list(result['updated_answers'].keys())}")
+                
                 # Save brief to MinIO
                 minio_path = BriefController.save_brief_to_minio(
                     business_id, 

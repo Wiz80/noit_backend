@@ -4,9 +4,16 @@ import os
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlparse
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 from app.models.business.competitive_analysis.competitors import Competitor
 from app.services.scrape.website_social_scraper import WebsiteSocialMediaScraper
+from app.schemas.business.business_competitors import WebsiteSocialMediaScrapingRequest, WebsiteSocialMediaScrapingResponse
+
+from app.services.llm.langchain_factory import LangChainLLMFactory
+from langchain_core.prompts import ChatPromptTemplate
+from app.utils.decode_json import clean_json_encoding
+from app.models.user import User
 
 load_dotenv()
 
@@ -30,7 +37,7 @@ class WebsiteExtractionController:
         self.business_id = business_id
         
         # Inicializar Website Social Media Scraper
-        self.website_social_scraper = WebsiteSocialMediaScraper(
+        self.scraper = WebsiteSocialMediaScraper(
             llm_provider="openai",
             llm_model="gpt-4o-mini",
             api_key=os.getenv("OPENAI_API_KEY"),
@@ -52,7 +59,7 @@ class WebsiteExtractionController:
             logger.info(f"Extrayendo redes sociales del sitio web: {website_url}")
             
             # Utilizar el WebsiteSocialMediaScraper para extraer información de redes sociales
-            social_media_info = await self.website_social_scraper.extract_social_media(website_url)
+            social_media_info = await self.scraper.extract_social_media(website_url)
             
             logger.info(f"Extracción exitosa de redes sociales del sitio web: {website_url}")
             return social_media_info
@@ -77,7 +84,7 @@ class WebsiteExtractionController:
             
             # For non-critical errors, log and return empty result
             logger.warning(f"⚠️ Non-critical error extracting social media from {website_url}: {str(e)}")
-            return self.website_social_scraper._get_empty_result()
+            return self.scraper._get_empty_result()
     
     @staticmethod
     def extract_base_url(url: str) -> str:
@@ -194,6 +201,43 @@ class WebsiteExtractionController:
             
         return results
             
+    async def _correct_website_url_with_llm(self, website_url: str) -> str:
+        """
+        Corrige una URL de sitio web mal formada utilizando un LLM.
+        Si la corrección falla, devuelve la URL original.
+        """
+        if not website_url or not isinstance(website_url, str):
+            return ""
+        
+        try:
+            logger.info(f"Intentando corregir URL con LLM: {website_url}")
+            llm = LangChainLLMFactory.create_llm(
+                provider="openai",
+                model="gpt-4o-mini",
+                temperature=0.0,
+                max_tokens=150
+            )
+
+            prompt_template = ChatPromptTemplate.from_messages([
+                ("system", "You are an expert at cleaning and correcting website URLs. Your task is to take a potentially malformed URL and return ONLY the corrected, clean, and functional URL. Remove any extra spaces, fix typos, and ensure it's a valid web address. Do not include 'http://' or 'https://' unless it's necessary to fix the URL. Do not add any explanation, preamble, or markdown. Only output the corrected URL string. For example, if the input is 'https: //www.ibm.com/ai', the output should be 'www.ibm.com/ai'."),
+                ("human", "Please correct the following URL: '{url}'")
+            ])
+            
+            chain = prompt_template | llm
+            response = await chain.ainvoke({"url": website_url})
+            
+            corrected_url = response.content.strip().replace(" ", "")
+            
+            if not corrected_url or "." not in corrected_url:
+                logger.warning(f"LLM produjo una URL sospechosa '{corrected_url}' desde '{website_url}'. Se usará la original.")
+                return website_url
+
+            logger.info(f"LLM corrigió la URL: '{website_url}' -> '{corrected_url}'")
+            return corrected_url
+        except Exception as e:
+            logger.error(f"Error corrigiendo URL con LLM: {e}. Se usará la URL original.")
+            return website_url
+        
     async def run_website_social_media_extraction(
         self,
         competitor_ids: List[str],
@@ -237,15 +281,25 @@ class WebsiteExtractionController:
                         completed += 1
                         continue
                     
+                    # Corregir la URL del sitio web usando LLM
+                    original_website = competitor.website
+                    corrected_website_url = await self._correct_website_url_with_llm(original_website)
+
+                    # Actualizar la web del competidor en la BD si se corrigió y update_db es true
+                    if update_db and original_website != corrected_website_url:
+                        competitor.website = corrected_website_url
+                        db.commit()
+                        logger.info(f"Sitio web del competidor {competitor.id} actualizado de '{original_website}' a '{corrected_website_url}'")
+
                     # Extraer redes sociales
                     if update_db:
-                        # Usar el método existente que ahora extrae la URL base
+                        # Usar el método existente que ahora extrae la URL base.
+                        # Este método usará el valor actualizado de la BD si se modificó.
                         result = await self.update_competitor_social_media(competitor_id, db)
                     else:
                         # Extraer la URL base para el sitio web
-                        original_website = competitor.website
-                        base_website_url = self.extract_base_url(competitor.website)
-                        logger.info(f"URL simplificada para extracción: {base_website_url} (original: {original_website})")
+                        base_website_url = self.extract_base_url(corrected_website_url)
+                        logger.info(f"URL simplificada para extracción: {base_website_url} (original: {original_website}, corregida: {corrected_website_url})")
                         
                         try:
                             # Extraer redes sociales sin actualizar la base de datos
@@ -255,6 +309,7 @@ class WebsiteExtractionController:
                                 "competitor_id": competitor_id,
                                 "original_website": original_website,
                                 "scraped_website": base_website_url,
+                                "corrected_website": corrected_website_url,
                                 "social_media": social_media
                             }
                         except Exception as e:
@@ -264,7 +319,8 @@ class WebsiteExtractionController:
                                 "error": str(e),
                                 "competitor_id": competitor_id,
                                 "original_website": original_website,
-                                "scraped_website": base_website_url
+                                "scraped_website": base_website_url,
+                                "corrected_website": corrected_website_url,
                             }
                     
                     results[competitor_id] = result

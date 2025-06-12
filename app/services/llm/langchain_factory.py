@@ -25,7 +25,7 @@ class LangChainLLMFactory:
     
     @staticmethod
     def create_llm(
-        provider: str = "anthropic",
+        provider: str = "openai",
         model: Optional[str] = None,
         temperature: float = 0.3,
         max_tokens: Optional[int] = None,
@@ -86,16 +86,20 @@ class LangChainLLMFactory:
     
     @staticmethod
     def _create_openai_llm(
-        model: str,
-        temperature: float,
-        max_tokens: Optional[int],
+        model: str = "gpt-4o-mini",
+        temperature: float = 0.3,
+        max_tokens: Optional[int] = None,
         **kwargs
     ) -> ChatOpenAI:
         """Create OpenAI LLM"""
+        logger.info("Attempting to create OpenAI LLM client.")
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
+            logger.error("OPENAI_API_KEY not found in environment variables.")
             raise ValueError("OPENAI_API_KEY not found in environment variables")
         
+        logger.debug(f"Found OPENAI_API_KEY with length: {len(api_key)}")
+
         params = {
             "model": model,
             "temperature": temperature,
@@ -105,8 +109,15 @@ class LangChainLLMFactory:
         
         if max_tokens:
             params["max_tokens"] = max_tokens
-            
-        return ChatOpenAI(**params)
+        
+        try:
+            logger.info(f"Initializing ChatOpenAI with model: {model}")
+            llm = ChatOpenAI(**params)
+            logger.info("Successfully created OpenAI LLM client.")
+            return llm
+        except Exception as e:
+            logger.error(f"Failed to create OpenAI LLM client: {str(e)}", exc_info=True)
+            raise
     
     @staticmethod
     def _create_deepseek_llm(

@@ -124,17 +124,12 @@ class ResearchController:
                     db=db
                 )
                 
-                # After successfully processing competitor data, trigger Kestra workflow
-                try:
-                    await self._trigger_kestra_social_media_extraction(business_id, task_id)
-                    logger.info(f"Successfully triggered Kestra social media extraction workflow for business: {business_id}")
-                except Exception as kestra_error:
-                    logger.error(f"Failed to trigger Kestra workflow: {str(kestra_error)}", exc_info=True)
-                    # Don't fail the whole process if Kestra call fails, just log the error
+                # The social media extraction webhook will be triggered from within the webhook_controller
+                # No need to trigger additional workflows here
                 
                 return {
                     "status": "success",
-                    "message": "Competitor analysis data processed and Kestra workflow triggered",
+                    "message": "Competitor analysis data processed successfully",
                     "request_id": task_id,
                     "business_id": business_id
                 }
@@ -198,12 +193,12 @@ class ResearchController:
                 if response.status_code in [200, 201, 202]:
                     logger.info("✅ Kestra social media extraction workflow triggered successfully")
                 else:
-                    logger.error(f"❌ Kestra webhook call failed with status {response.status_code}: {response.text}")
-                    raise Exception(f"Kestra webhook failed with status {response.status_code}")
+                    logger.warning(f"❌ Kestra webhook call failed with status {response.status_code}: {response.text}")
+                    return  # Don't raise exception, just return
                     
         except httpx.TimeoutException:
-            logger.error("⏰ Timeout calling Kestra webhook")
-            raise Exception("Timeout calling Kestra webhook")
+            logger.warning("⏰ Timeout calling Kestra webhook")
+            return  # Don't raise exception, just return
         except Exception as e:
-            logger.error(f"💥 Error calling Kestra webhook: {str(e)}")
-            raise
+            logger.warning(f"💥 Error calling Kestra webhook: {str(e)}")
+            return  # Don't raise exception, just return

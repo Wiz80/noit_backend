@@ -13,6 +13,7 @@ from app.api.v1.endpoints.business.competitive_analysis.instagram import (
 )
 from app.api.v1.endpoints.business.competitive_analysis.linkedin import linkedin
 from app.api.v1.endpoints.business.webhooks import research_callback
+from app.api.v1.endpoints.health import kestra_health
 
 api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["authentication"])
@@ -73,4 +74,10 @@ api_router.include_router(
     social_media.router,
     prefix="/analyze-competitors/extract-social-media",
     tags=["extract-social-media"]
+)
+
+api_router.include_router(
+    kestra_health.router,
+    prefix="/health",
+    tags=["kestra-health"]
 )

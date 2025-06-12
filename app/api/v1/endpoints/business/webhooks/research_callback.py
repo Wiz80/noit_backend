@@ -9,6 +9,8 @@ import json
 from app.services.storage.minio_service import MinioService
 from app.controllers.research_controller import ResearchController
 from fastapi.responses import JSONResponse
+import re
+from app.models.business.competitive_analysis.business_competitor import CompetitorResearch
 
 
 router = APIRouter()
@@ -370,5 +372,71 @@ async def state_of_art_callback(
                 "message": f"Error processing state of art callback: {str(e)}",
                 "task_id": task_id,
                 "status": "error_processing"
+            }
+        )
+
+@router.post("/competitor-analysis-callback/{request_id}")
+async def competitor_analysis_callback(
+    request_id: str = Path(..., description="ID of the competitor research request"),
+    request: Request = None,
+    db: Session = Depends(deps.get_db),
+) -> JSONResponse:
+    """
+    Dedicated webhook endpoint for competitor analysis callbacks.
+    """
+    logger.info(f"COMPETITOR ANALYSIS CALLBACK received for request: {request_id}")
+    
+    try:
+        body = await request.body()
+        body_str = body.decode('utf-8')
+        logger.info(f"Competitor analysis callback body (first 500 chars): {body_str[:500]}...")
+        
+        try:
+            body_json = json.loads(body_str)
+        except json.JSONDecodeError:
+            # If direct parsing fails, try to find JSON within markdown
+            match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', body_str, re.DOTALL)
+            if match:
+                logger.info("Found JSON block wrapped in markdown in callback body.")
+                json_str = match.group(1)
+                body_json = json.loads(json_str)
+            else:
+                logger.error(f"Failed to parse JSON from callback body: {body_str}")
+                return JSONResponse(status_code=400, content={"message": "Invalid JSON in callback body"})
+
+        # Manually add business_id and request_id if they are not in the main body
+        if "request_id" not in body_json:
+            body_json["request_id"] = request_id
+        
+        # The controller expects the business_id, so we fetch it from the research record
+        research = db.query(CompetitorResearch).filter(CompetitorResearch.id == request_id).first()
+        if research and "business_id" not in body_json:
+            body_json["business_id"] = research.business_id
+
+        # Instantiate the controller and process the data
+        from app.controllers.competitive_analysis.webhook_controller import WebhookController
+        webhook_controller = WebhookController()
+        
+        await webhook_controller.process_competitor_data(
+            body_json=body_json,
+            db=db
+        )
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": "Competitor analysis callback processed successfully.",
+                "request_id": request_id,
+                "status": "success"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing competitor analysis callback: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "message": f"Internal server error: {str(e)}",
+                "request_id": request_id
             }
         ) 

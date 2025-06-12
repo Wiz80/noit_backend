@@ -56,7 +56,6 @@ class WebsiteSocialMediaScraper:
         config = {
             "llm": {
                 "model": f"{self.llm_provider}/{self.llm_model}" if self.llm_provider != "openai" else self.llm_model,
-                "model_tokens": 8192
             },
             "verbose": self.verbose,
             "headless": self.headless
@@ -162,8 +161,8 @@ class WebsiteSocialMediaScraper:
                                 logger.info(f"Successfully extracted social media from {normalized_url} using fallback method")
                                 return processed_result
                             else:
-                                logger.error(f"SmartScraperGraph fallback failed for {normalized_url}")
-                                return self._get_empty_result()
+                                logger.warning(f"SmartScraperGraph fallback failed for {normalized_url}, trying simplified extraction.")
+                                return await self._simplified_extraction(normalized_url)
                     except Exception as e:
                         logger.error(f"Error in ThreadPoolExecutor for {normalized_url}: {str(e)}")
                         # If thread-based approach fails, try one more fallback with simplified extraction
@@ -194,10 +193,23 @@ class WebsiteSocialMediaScraper:
             # Initialize playwright
             async with async_playwright() as p:
                 # Launch browser
-                browser = await p.chromium.launch(headless=self.headless)
+                browser = await p.chromium.launch(headless=self.headless, args=[
+                    "--disable-http2",
+                    "--disable-quic"
+                ])
                 
-                # Create a new page
-                page = await browser.new_page()
+                # Create browser context with realistic user-agent and ignoring HTTPS errors
+                context = await browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/123.0.0.0 Safari/537.36"
+                    ),
+                    ignore_https_errors=True
+                )
+
+                # Create a new page within that context
+                page = await context.new_page()
                 
                 # Set a reasonable timeout
                 page.set_default_timeout(60000)  # 60 seconds (increased from 30)
@@ -398,12 +410,24 @@ class WebsiteSocialMediaScraper:
         try:
             # Initialize playwright
             async with async_playwright() as p:
-                # Launch browser with shorter timeout
-                browser = await p.chromium.launch(headless=self.headless)
+                # Launch browser with shorter timeout and flags to avoid HTTP/2 issues
+                browser = await p.chromium.launch(headless=self.headless, args=[
+                    "--disable-http2",
+                    "--disable-quic"
+                ])
                 
+                # Create browser context with realistic user-agent and ignoring HTTPS errors
+                context = await browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/123.0.0.0 Safari/537.36"
+                    ),
+                    ignore_https_errors=True
+                )
+
                 # Create a new page with shorter timeout
-                page = await browser.new_page()
-                page.set_default_timeout(15000)  # 15 seconds
+                page = await context.new_page()
                 
                 # Set request timeout
                 try:

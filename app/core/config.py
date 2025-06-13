@@ -10,8 +10,11 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Business AI API"
     API_V1_STR: str = "/api/v1"
     
-    # Google
-    GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID")
+    # Google OAuth2 (Optional for development)
+    GOOGLE_CLIENT_ID: Optional[str] = os.getenv("GOOGLE_CLIENT_ID")
+    GOOGLE_CLIENT_SECRET: Optional[str] = os.getenv("GOOGLE_CLIENT_SECRET")
+    GOOGLE_REDIRECT_URI: str = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/v1/auth/google/callback")
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:8000/docs")
     
     # JWT
     SECRET_KEY: str = os.getenv("SECRET_KEY")
@@ -53,5 +56,9 @@ class Settings(BaseSettings):
     @property
     def get_database_url(self) -> str:
         return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+
+    def google_oauth_enabled(self) -> bool:
+        """Check if Google OAuth is properly configured"""
+        return bool(self.GOOGLE_CLIENT_ID and self.GOOGLE_CLIENT_SECRET)
 
 settings = Settings()

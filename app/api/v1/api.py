@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 from app.api.v1.endpoints import auth
-from app.api.v1.endpoints.business.business_understanding import business_idea, business_brief, state_of_art
+from app.api.v1.endpoints.business.business_understanding import business_idea, business_brief, business_brief_websocket, state_of_art
 from app.api.v1.endpoints.business.competitive_analysis import (
     business_competitors, 
     social_media
@@ -62,6 +62,12 @@ api_router.include_router(
     business_brief.router,
     prefix="/business-brief",
     tags=["business-brief"]
+)
+
+api_router.include_router(
+    business_brief_websocket.router,
+    prefix="/ws",
+    tags=["business-brief-websocket"]
 )
 
 api_router.include_router(

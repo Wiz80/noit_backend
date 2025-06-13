@@ -51,6 +51,7 @@ env/
 *.swo
 *~
 .DS_Store
+*.json
 
 # Project specific
 tests/

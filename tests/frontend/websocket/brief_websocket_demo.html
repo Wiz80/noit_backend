@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo WebSocket Brief Chat</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .connection-panel {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        
+        .connection-panel input {
+            margin: 5px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            width: 200px;
+        }
+        
+        .connection-panel button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        
+        .connection-panel button:hover {
+            background: #1976D2;
+        }
+        
+        .connection-panel button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .connection-panel select {
+            margin: 5px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+        }
+        
+        .connection-panel select:disabled {
+            background: #f5f5f5;
+            color: #666;
+            cursor: not-allowed;
+        }
+        
+        .status {
+            display: flex;
+            align-items: center;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        
+        .connected {
+            background-color: #4CAF50;
+            box-shadow: 0 0 6px rgba(76, 175, 80, 0.6);
+        }
+        
+        .disconnected {
+            background-color: #f44336;
+            box-shadow: 0 0 6px rgba(244, 67, 54, 0.6);
+        }
+        
+        #status-bar {
+            background: #f0f0f0;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border-left: 4px solid #2196F3;
+        }
+        
+        #connection-status {
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        #progress-container {
+            margin-top: 10px;
+        }
+        
+        #progress-track {
+            background: #e0e0e0;
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        #progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #45a049);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+        
+        #progress-text {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        
+        #chat-container {
+            display: flex;
+            gap: 20px;
+        }
+        
+        #chat-messages {
+            flex: 2;
+            height: 500px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 15px;
+            background: #fafafa;
+            border-radius: 5px;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+        
+        .user-message {
+            background: #e3f2fd;
+            margin-left: auto;
+            text-align: right;
+        }
+        
+        .bot-message {
+            background: #f5f5f5;
+            border-left: 4px solid #2196F3;
+            max-width: 90%;
+        }
+        
+        .bot-message .suggestion-box {
+            margin-top: 12px;
+            padding: 12px;
+            background: rgba(74, 108, 247, 0.05);
+            border-left: 3px solid #4a6cf7;
+            border-radius: 6px;
+        }
+        
+        .bot-message .suggestion-item {
+            background: white;
+            padding: 8px;
+            border-radius: 4px;
+            border: 1px solid rgba(74, 108, 247, 0.2);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 8px;
+        }
+        
+        .bot-message .suggestion-item:hover {
+            background: rgba(74, 108, 247, 0.1);
+            border-color: #4a6cf7;
+            transform: translateY(-1px);
+        }
+        
+        .bot-message .suggestion-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .system-message {
+            background: #fff3e0;
+            text-align: center;
+            font-style: italic;
+            color: #666;
+        }
+        
+        .error-message {
+            background: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #f44336;
+        }
+        
+        .completion-message {
+            background: #e8f5e8;
+            color: #2e7d2e;
+            border-left: 4px solid #4CAF50;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        #sidebar {
+            flex: 1;
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        
+        #typing-indicator {
+            font-style: italic;
+            color: #666;
+            padding: 10px;
+            display: none;
+        }
+        
+        #suggestions-panel {
+            background: #fff3e0;
+            border: 2px solid #ffb74d;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            display: none;
+        }
+        
+        #suggestions-panel h4 {
+            margin-top: 0;
+            color: #ef6c00;
+        }
+        
+        #suggestions-panel button {
+            background: #ff9800;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        
+        #suggestions-panel button:hover {
+            background: #f57c00;
+        }
+        
+        #chat-input-container {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            display: none;
+        }
+        
+        #message-input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        #send-button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        
+        #send-button:hover {
+            background: #45a049;
+        }
+        
+        #send-button:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        #question-progress {
+            text-align: center;
+            font-weight: bold;
+            color: #666;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        
+        .info-panel {
+            background: #e8f5e8;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        
+        .log-entry {
+            font-family: monospace;
+            font-size: 12px;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+            color: #666;
+        }
+        
+        #logs {
+            max-height: 200px;
+            overflow-y: auto;
+            background: #f8f8f8;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 Demo WebSocket Brief Chat</h1>
+        
+        <!-- Panel de configuración y conexión -->
+        <div class="connection-panel">
+            <h3>Autenticación</h3>
+            <div>
+                <input type="text" id="token" placeholder="JWT Token" style="width: 100%; margin-bottom: 10px;">
+                <button id="login-btn" onclick="handleLogin()" style="width: 100%; margin-bottom: 10px;">🔐 Autenticar</button>
+                <div class="status" style="justify-content: center; margin-bottom: 15px;">
+                    <div class="status-dot disconnected" id="auth-status-dot"></div>
+                    <span id="auth-status-text">No autenticado</span>
+                </div>
+            </div>
+            
+            <h3>Configuración WebSocket</h3>
+            <div>
+                <select id="business-selector" style="width: 100%; margin-bottom: 10px;" disabled>
+                    <option value="">Selecciona un negocio...</option>
+                </select>
+                <input type="text" id="llm-model" placeholder="LLM Model" value="gpt-4o-mini" style="width: 100%; margin-bottom: 10px;">
+            </div>
+            <div>
+                <button id="connect-btn" onclick="connectWebSocket()" disabled>🔌 Conectar WebSocket</button>
+                <button id="disconnect-btn" onclick="disconnectWebSocket()" disabled>🔌 Desconectar</button>
+                <button onclick="clearMessages()">🗑️ Limpiar Chat</button>
+                <button onclick="sendTestMessage()" id="test-btn" disabled>🧪 Mensaje de Prueba</button>
+            </div>
+        </div>
+        
+        <!-- Barra de estado -->
+        <div id="status-bar">
+            <div id="connection-status">Desconectado</div>
+            <div id="progress-container" style="display:none;">
+                <div id="progress-track">
+                    <div id="progress-bar"></div>
+                </div>
+                <div id="progress-text">0%</div>
+            </div>
+        </div>
+        
+        <!-- Contenedor principal del chat -->
+        <div id="chat-container">
+            <!-- Área de mensajes -->
+            <div style="flex: 2;">
+                <div id="chat-messages"></div>
+                
+                <div id="typing-indicator">
+                    <span>🤖 El asistente está escribiendo...</span>
+                </div>
+                
+                <div id="suggestions-panel">
+                    <h4>💡 Sugerencia de Respuesta</h4>
+                    <p id="suggestion-text"></p>
+                    <button id="use-suggestion" onclick="useSuggestion()">📝 Usar esta respuesta</button>
+                </div>
+                
+                <div id="chat-input-container">
+                    <input type="text" id="message-input" placeholder="Escribe tu respuesta aquí..." onkeypress="handleKeyPress(event)">
+                    <button id="send-button" onclick="sendMessage()">📤 Enviar</button>
+                </div>
+                
+                <div id="question-progress">
+                    <span id="question-counter">Pregunta 0 de 0</span>
+                </div>
+            </div>
+            
+            <!-- Sidebar con información -->
+            <div id="sidebar">
+                <div class="info-panel">
+                    <h4>ℹ️ Estado de la Sesión</h4>
+                    <div><strong>Sesión ID:</strong> <span id="session-id">No conectado</span></div>
+                    <div><strong>Business ID:</strong> <span id="current-business-id">-</span></div>
+                    <div><strong>Modelo LLM:</strong> <span id="current-llm-model">-</span></div>
+                </div>
+                
+                <h4>📝 Log de Actividad</h4>
+                <div id="logs"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ======= Configuración =======
+        const API_URL = 'http://localhost:8000/api/v1';
+        
+        // ======= Estado =======
+        const state = {
+            token: localStorage.getItem('token') || '',
+            businesses: [],
+            selectedBusiness: null,
+            isAuthenticated: false,
+            websocket: null,
+            sessionId: null,
+            isConnected: false,
+            currentQuestionIndex: 0,
+            totalQuestions: 0
+        };
+        
+        // ======= Funciones de autenticación =======
+        async function fetchBusinesses() {
+            addLog(`Fetching businesses from ${API_URL}/business-idea/`);
+            try {
+                const response = await fetch(`${API_URL}/business-idea/`, {
+                    headers: {
+                        'Authorization': `Bearer ${state.token}`
+                    }
+                });
+
+                addLog(`Response status: ${response.status} ${response.statusText}`);
+                
+                if (!response.ok) {
+                    throw new Error(`Failed to fetch businesses: ${response.status} ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                addLog(`Fetched businesses: ${data.length} found`);
+                return data;
+            } catch (error) {
+                addLog(`Error fetching businesses: ${error.message}`, 'error');
+                throw error;
+            }
+        }
+
+        async function handleLogin() {
+            const token = document.getElementById('token').value.trim();
+            if (!token) {
+                alert('Por favor, ingresa un token JWT válido');
+                return;
+            }
+            
+            state.token = token;
+            localStorage.setItem('token', token);
+            
+            addLog(`Token saved: ${token.substring(0, 15)}...`);
+            
+            try {
+                const businesses = await fetchBusinesses();
+                state.businesses = businesses;
+                state.isAuthenticated = true;
+                
+                updateAuthStatus(true);
+                populateBusinessSelector(businesses);
+                addLog('Login successful');
+            } catch (error) {
+                addLog(`Login failed: ${error.message}`, 'error');
+                alert(`Error al iniciar sesión: ${error.message}`);
+                updateAuthStatus(false);
+            }
+        }
+
+        function updateAuthStatus(isAuthenticated) {
+            const authDot = document.getElementById('auth-status-dot');
+            const authText = document.getElementById('auth-status-text');
+            const businessSelector = document.getElementById('business-selector');
+            const connectBtn = document.getElementById('connect-btn');
+            
+            if (isAuthenticated) {
+                authDot.classList.remove('disconnected');
+                authDot.classList.add('connected');
+                authText.textContent = 'Autenticado ✅';
+                businessSelector.disabled = false;
+            } else {
+                authDot.classList.remove('connected');
+                authDot.classList.add('disconnected');
+                authText.textContent = 'No autenticado ❌';
+                businessSelector.disabled = true;
+                connectBtn.disabled = true;
+            }
+        }
+
+        function populateBusinessSelector(businesses) {
+            const selector = document.getElementById('business-selector');
+            selector.innerHTML = '<option value="">Selecciona un negocio...</option>';
+            
+            businesses.forEach(business => {
+                const option = document.createElement('option');
+                option.value = business.id;
+                option.textContent = `${business.title} (${business.id.substring(0, 8)}...)`;
+                selector.appendChild(option);
+            });
+            
+            // Enable connect button when business is selected
+            selector.addEventListener('change', function() {
+                const connectBtn = document.getElementById('connect-btn');
+                if (this.value) {
+                    state.selectedBusiness = this.value;
+                    connectBtn.disabled = false;
+                    addLog(`Business selected: ${this.value}`);
+                } else {
+                    state.selectedBusiness = null;
+                    connectBtn.disabled = true;
+                }
+            });
+        }
+
+        // Función para conectar WebSocket
+        function connectWebSocket() {
+            if (!state.isAuthenticated) {
+                alert('Por favor autentícate primero');
+                return;
+            }
+            
+            if (!state.selectedBusiness) {
+                alert('Por favor selecciona un negocio');
+                return;
+            }
+            
+            const token = state.token;
+            const businessId = state.selectedBusiness;
+            const llmModel = document.getElementById('llm-model').value;
+            
+            // Construir URL del WebSocket
+            const wsProtocol = 'ws:';
+            const wsHost = 'localhost:8000';  // FastAPI corriendo en Docker
+            const params = new URLSearchParams({
+                token: token,
+                llm_model: llmModel,
+                llm_temperature: 0.7,
+                llm_max_tokens: 4000
+            });
+            
+            const wsUrl = `${wsProtocol}//${wsHost}/api/v1/ws/business/${businessId}/brief/chat?${params}`;
+            
+            addLog(`Conectando a: ${wsUrl}`);
+            updateStatus('Conectando...');
+            
+            state.websocket = new WebSocket(wsUrl);
+            
+            state.websocket.onopen = function(event) {
+                state.isConnected = true;
+                updateStatus('Conectado ✅');
+                document.getElementById('connect-btn').disabled = true;
+                document.getElementById('disconnect-btn').disabled = false;
+                document.getElementById('test-btn').disabled = false;
+                document.getElementById('current-business-id').textContent = businessId;
+                document.getElementById('current-llm-model').textContent = llmModel;
+                addLog('WebSocket conectado exitosamente');
+            };
+            
+            state.websocket.onmessage = function(event) {
+                const message = JSON.parse(event.data);
+                handleWebSocketMessage(message);
+            };
+            
+            state.websocket.onclose = function(event) {
+                state.isConnected = false;
+                updateStatus(`Desconectado ❌ (Código: ${event.code})`);
+                document.getElementById('connect-btn').disabled = false;
+                document.getElementById('disconnect-btn').disabled = true;
+                document.getElementById('test-btn').disabled = true;
+                addLog(`WebSocket cerrado: ${event.code} - ${event.reason || 'Sin razón'}`);
+            };
+            
+            state.websocket.onerror = function(error) {
+                addLog(`Error en WebSocket: ${error}`);
+                updateStatus('Error de conexión ❌');
+            };
+        }
+        
+        // Función para desconectar WebSocket
+        function disconnectWebSocket() {
+            if (state.websocket) {
+                state.websocket.close();
+                state.websocket = null;
+            }
+        }
+        
+        // Manejar mensajes del WebSocket
+        function handleWebSocketMessage(message) {
+            addLog(`Mensaje recibido: ${message.type}`);
+            
+            switch (message.type) {
+                case 'connection_established':
+                    state.totalQuestions = message.total_questions;
+                    updateQuestionProgress(0, state.totalQuestions);
+                    addSystemMessage(`Conexión establecida. ${state.totalQuestions} preguntas en total.`);
+                    break;
+                    
+                case 'session_created':
+                    state.sessionId = message.session_id;
+                    document.getElementById('session-id').textContent = state.sessionId;
+                    addSystemMessage(`Nueva sesión creada: ${state.sessionId}`);
+                    showChatInterface();
+                    break;
+                    
+                case 'progress_update':
+                    updateProgressBar(message.progress);
+                    updateStatus(message.status);
+                    addLog(`Progreso: ${message.progress}% - ${message.status}`);
+                    break;
+                    
+                case 'typing_indicator':
+                    showTypingIndicator(message.is_typing);
+                    break;
+                    
+                case 'complete_response':
+                    handleCompleteResponse(message.data);
+                    break;
+                    
+                case 'brief_completed':
+                    addCompletionMessage('🎉 ¡Brief completado exitosamente!');
+                    showDownloadOptions();
+                    break;
+                    
+                case 'error':
+                    addErrorMessage(`Error ${message.error_code}: ${message.message}`);
+                    break;
+                    
+                case 'session_completed':
+                    addSystemMessage(message.message);
+                    break;
+                    
+                case 'pong':
+                    addLog('Pong recibido - conexión activa');
+                    break;
+                    
+                default:
+                    addLog(`Tipo de mensaje no manejado: ${message.type}`);
+            }
+        }
+        
+        // Manejar respuesta completa
+        function handleCompleteResponse(data) {
+            hideProgressBar();
+            
+            // Usar el nuevo formato que incluye sugerencias integradas
+            addBotMessage(data.reply, data.suggestion_answer, data.suggestion_response);
+            
+            // Actualizar progreso de preguntas
+            state.currentQuestionIndex = data.current_question_index || 0;
+            updateQuestionProgress(state.currentQuestionIndex, state.totalQuestions);
+            
+            // Ya no necesitamos mostrar sugerencias por separado porque están integradas
+            // pero mantenemos la funcionalidad por compatibilidad
+            if (data.suggestion_answer || data.suggestion_response) {
+                addLog(`Sugerencias recibidas: ${data.suggestion_answer ? 'answer' : ''} ${data.suggestion_response ? 'response' : ''}`);
+            }
+        }
+        
+        // Funciones de interfaz
+        function updateStatus(status) {
+            document.getElementById('connection-status').textContent = status;
+        }
+        
+        function updateProgressBar(progress) {
+            const progressBar = document.getElementById('progress-bar');
+            const progressText = document.getElementById('progress-text');
+            const progressContainer = document.getElementById('progress-container');
+            
+            progressContainer.style.display = 'block';
+            progressBar.style.width = `${progress}%`;
+            progressText.textContent = `${progress}%`;
+        }
+        
+        function hideProgressBar() {
+            document.getElementById('progress-container').style.display = 'none';
+        }
+        
+        function showTypingIndicator(show) {
+            const indicator = document.getElementById('typing-indicator');
+            indicator.style.display = show ? 'block' : 'none';
+            
+            if (show) {
+                addLog('🤖 El asistente está escribiendo...');
+                // Añadir animación de puntos
+                let dots = 0;
+                const interval = setInterval(() => {
+                    if (!show || indicator.style.display === 'none') {
+                        clearInterval(interval);
+                        return;
+                    }
+                    dots = (dots + 1) % 4;
+                    const dotText = '.'.repeat(dots);
+                    indicator.innerHTML = `<span>🤖 El asistente está escribiendo${dotText}</span>`;
+                }, 500);
+            } else {
+                addLog('✅ El asistente terminó de escribir');
+            }
+        }
+        
+        function showChatInterface() {
+            document.getElementById('chat-input-container').style.display = 'flex';
+        }
+        
+        function updateQuestionProgress(current, total) {
+            document.getElementById('question-counter').textContent = `Pregunta ${current + 1} de ${total}`;
+        }
+        
+        function showSuggestion(suggestionText) {
+            const panel = document.getElementById('suggestions-panel');
+            const text = document.getElementById('suggestion-text');
+            
+            text.textContent = suggestionText;
+            panel.style.display = 'block';
+        }
+        
+        function hideSuggestion() {
+            document.getElementById('suggestions-panel').style.display = 'none';
+        }
+        
+        function useSuggestion() {
+            const suggestionText = document.getElementById('suggestion-text').textContent;
+            document.getElementById('message-input').value = suggestionText;
+            hideSuggestion();
+        }
+        
+        // Funciones de mensajes mejoradas
+        function addSystemMessage(message) {
+            addMessage(message, 'system-message');
+        }
+        
+        function addUserMessage(message) {
+            addMessage(`<strong>Tú:</strong> ${message}`, 'user-message');
+        }
+        
+        function addBotMessage(message, suggestionAnswer = null, suggestionResponse = null) {
+            const content = formatBotMessage(message, suggestionAnswer, suggestionResponse);
+            addMessage(content, 'bot-message');
+        }
+        
+        function addErrorMessage(message) {
+            addMessage(`❌ ${message}`, 'error-message');
+        }
+        
+        function addCompletionMessage(message) {
+            addMessage(message, 'completion-message');
+        }
+        
+        function formatBotMessage(message, suggestionAnswer = null, suggestionResponse = null) {
+            let htmlContent = `<strong>🤖 Asistente:</strong><br>`;
+            
+            // Format the main message with better question formatting
+            if (message.includes('**') && message.includes('Pregunta')) {
+                const lines = message.split('\n');
+                let formattedContent = '';
+                
+                for (let line of lines) {
+                    if (line.includes('**ETAPA') && line.includes('**')) {
+                        // Phase header
+                        const phase = line.replace(/\*\*/g, '');
+                        formattedContent += `<div style="background: rgba(74, 108, 247, 0.1); padding: 8px; border-radius: 6px; margin: 10px 0; border-left: 4px solid #4a6cf7;"><strong style="color: #4a6cf7;">${phase}</strong></div>`;
+                    } else if (line.includes('**Pregunta') && line.includes('**')) {
+                        // Question text
+                        const questionText = line.replace(/\*\*/g, '');
+                        formattedContent += `<div style="background: #f0f0f0; padding: 8px; border-radius: 4px; margin: 5px 0;"><strong>${questionText}</strong></div>`;
+                    } else if (line.trim()) {
+                        // Regular content
+                        formattedContent += `<div style="margin: 5px 0;">${line}</div>`;
+                    }
+                }
+                
+                htmlContent += formattedContent;
+            } else {
+                // Regular message formatting
+                htmlContent += `<div style="margin: 5px 0;">${message.replace(/\n/g, '<br>')}</div>`;
+            }
+            
+            // Add suggestions if they exist
+            if (suggestionAnswer || suggestionResponse) {
+                htmlContent += `<div style="margin-top: 15px; padding: 12px; background: rgba(74, 108, 247, 0.05); border-left: 3px solid #4a6cf7; border-radius: 6px;">`;
+                htmlContent += `<div style="font-weight: bold; color: #4a6cf7; margin-bottom: 8px;">💡 Sugerencias de Respuesta</div>`;
+                
+                if (suggestionAnswer) {
+                    htmlContent += `
+                        <div style="margin-bottom: 8px;">
+                            <div style="font-size: 0.85em; font-weight: bold; color: #666; margin-bottom: 4px;">CÓMO RESPONDER:</div>
+                            <div style="background: white; padding: 8px; border-radius: 4px; border: 1px solid rgba(74, 108, 247, 0.2); cursor: pointer; transition: all 0.2s ease;" 
+                                 onclick="fillSuggestion('${suggestionAnswer.replace(/'/g, "\\'")}')">
+                                ${suggestionAnswer.replace(/\n/g, '<br>')}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                if (suggestionResponse) {
+                    htmlContent += `
+                        <div>
+                            <div style="font-size: 0.85em; font-weight: bold; color: #666; margin-bottom: 4px;">EJEMPLO DE RESPUESTA:</div>
+                            <div style="background: white; padding: 8px; border-radius: 4px; border: 1px solid rgba(74, 108, 247, 0.2); cursor: pointer; transition: all 0.2s ease;" 
+                                 onclick="fillSuggestion('${suggestionResponse.replace(/'/g, "\\'")}')">
+                                ${suggestionResponse.replace(/\n/g, '<br>')}
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                htmlContent += `</div>`;
+            }
+            
+            return htmlContent;
+        }
+        
+        function fillSuggestion(text) {
+            document.getElementById('message-input').value = text;
+            document.getElementById('message-input').focus();
+            // Hide the old suggestion panel if it's visible
+            hideSuggestion();
+        }
+        
+        function addMessage(content, className) {
+            const messagesDiv = document.getElementById('chat-messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${className}`;
+            messageDiv.innerHTML = content;
+            
+            // Add timestamp
+            const timeDiv = document.createElement('div');
+            timeDiv.style.cssText = 'font-size: 0.7em; color: #888; margin-top: 5px; text-align: right;';
+            timeDiv.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            messageDiv.appendChild(timeDiv);
+            
+            messagesDiv.appendChild(messageDiv);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function addLog(message) {
+            const logsDiv = document.getElementById('logs');
+            const timestamp = new Date().toLocaleTimeString();
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.textContent = `[${timestamp}] ${message}`;
+            logsDiv.appendChild(logEntry);
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+        }
+        
+        function clearMessages() {
+            document.getElementById('chat-messages').innerHTML = '';
+        }
+        
+        // Enviar mensaje
+        function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+            
+            if (!message) {
+                alert('Por favor escribe un mensaje');
+                return;
+            }
+            
+            if (!state.isConnected) {
+                alert('WebSocket no está conectado');
+                return;
+            }
+            
+            // Mostrar mensaje del usuario
+            addUserMessage(message);
+            
+            // Enviar al servidor
+            const payload = {
+                type: 'chat_message',
+                message: message,
+                session_id: state.sessionId
+            };
+            
+            state.websocket.send(JSON.stringify(payload));
+            addLog(`Mensaje enviado: ${message.substring(0, 50)}...`);
+            
+            // Limpiar input y ocultar sugerencias
+            input.value = '';
+            hideSuggestion();
+            
+            // Mostrar progreso
+            updateProgressBar(0);
+        }
+        
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+        
+        function showDownloadOptions() {
+            const chatInputContainer = document.getElementById('chat-input-container');
+            chatInputContainer.innerHTML = `
+                <button onclick="downloadReport()" style="background: #4CAF50; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+                    📄 Descargar Reporte
+                </button>
+                <button onclick="startNewBrief()" style="background: #2196F3; color: white; padding: 12px 24px; border: none; border-radius: 5px; cursor: pointer;">
+                    🔄 Nuevo Brief
+                </button>
+            `;
+        }
+        
+        function downloadReport() {
+            alert('Funcionalidad de descarga no implementada en este demo');
+        }
+        
+        function startNewBrief() {
+            if (confirm('¿Iniciar un nuevo brief? Esto creará una nueva sesión.')) {
+                state.sessionId = null;
+                state.currentQuestionIndex = 0;
+                clearMessages();
+                document.getElementById('session-id').textContent = 'No conectado';
+                // Reconectar para nueva sesión
+                disconnectWebSocket();
+                setTimeout(connectWebSocket, 1000);
+            }
+        }
+        
+        function sendTestMessage() {
+            if (!state.isConnected) {
+                alert('WebSocket no está conectado');
+                return;
+            }
+            
+            const testMessage = "Hola, quiero comenzar el brief para mi negocio. ¿Cuál es la primera pregunta?";
+            
+            // Mostrar mensaje del usuario
+            addUserMessage(testMessage);
+            
+            // Enviar al servidor
+            const payload = {
+                type: 'chat_message',
+                message: testMessage,
+                session_id: state.sessionId
+            };
+            
+            state.websocket.send(JSON.stringify(payload));
+            addLog(`Mensaje de prueba enviado: ${testMessage}`);
+            
+            // Mostrar progreso inicial
+            updateProgressBar(0);
+        }
+        
+        // Mantener conexión viva
+        setInterval(() => {
+            if (state.isConnected && state.websocket) {
+                state.websocket.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 30000);
+        
+        // Inicialización
+        document.addEventListener('DOMContentLoaded', () => {
+            addLog('Demo WebSocket Brief Chat iniciado');
+            updateStatus('Listo para conectar');
+            
+            // Cargar token si existe
+            if (state.token) {
+                document.getElementById('token').value = state.token;
+                addLog(`Token loaded from storage: ${state.token.substring(0, 15)}...`);
+                
+                // Intentar cargar negocios automáticamente
+                fetchBusinesses()
+                    .then(businesses => {
+                        state.businesses = businesses;
+                        state.isAuthenticated = true;
+                        updateAuthStatus(true);
+                        populateBusinessSelector(businesses);
+                        addLog('Automatically authenticated');
+                    })
+                    .catch(error => {
+                        addLog(`Auto-authentication failed: ${error.message}`, 'error');
+                        updateAuthStatus(false);
+                    });
+            } else {
+                updateAuthStatus(false);
+            }
+        });
+    </script>
+</body>
+</html> 

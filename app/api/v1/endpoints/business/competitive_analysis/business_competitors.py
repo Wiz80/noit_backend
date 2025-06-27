@@ -23,7 +23,12 @@ from app.models.business.competitive_analysis.competitors import Competitor
 from app.models.business.business_understanding.business_model import BusinessModel as BusinessModelDB
 from app.models.user import User
 
-from app.schemas.business.business_competitors import CompetitorAnalysisRequest, CompetitorAnalysisCallback
+from app.schemas.business.business_competitors import (
+    CompetitorAnalysisRequest, 
+    CompetitorAnalysisCallback,
+    GetCompetitorsResponse,
+    Competitor as CompetitorSchema
+)
 from sqlalchemy.orm import Session
 
 from app.utils.decode_json import clean_json_encoding
@@ -497,33 +502,28 @@ async def list_researches(
             }
         )
     
-@router.get("/{business_id}/competitors")
+@router.get("/{business_id}/competitors", response_model=GetCompetitorsResponse)
 async def get_competitors(
     business_id: str,
-    db: Session = Depends(deps.get_db)
-) -> JSONResponse:
+    db: Session = Depends(deps.get_db),
+    current_user: User = Depends(deps.get_current_active_user)
+) -> Any:
     """
-    Get the competitors for a business
+    Get the competitors for a business.
+    
+    This endpoint retrieves all competitors associated with a specific business idea
+    and returns them in a structured list.
     """
     try:
-        competitors = db.query(Competitor).filter(Competitor.business_id == business_id).all()
-        # return an object of list of Competitor where the key is the competitor_id and the value is the competitor object 
-        # with every field of the competitor object
-        competitors_dict = {}
-        for competitor in competitors:
-            competitors_dict[competitor.id] = competitor.model_dump()
-        return JSONResponse(
-            status_code=200,
-            content={
-                "business_id": business_id,
-                "competitors": competitors_dict
-            }
-        )
+        competitors = db.query(Competitor).filter(Competitor.business_idea_id == business_id).all()
+        
+        return {
+            "business_id": business_id,
+            "competitors": competitors
+        }
     except Exception as e:
-        logger.error(f"Error getting competitors: {str(e)}")
-        return JSONResponse(
+        logger.error(f"Error getting competitors for business_id {business_id}: {str(e)}")
+        raise HTTPException(
             status_code=500,
-            content={
-                "message": f"Error getting competitors: {str(e)}"
-            }
+            detail=f"An unexpected error occurred while fetching competitors."
         )

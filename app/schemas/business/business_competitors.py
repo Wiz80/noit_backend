@@ -39,6 +39,26 @@ class CompetitorInfo(BaseModel):
     pricing_strategy: Optional[str] = None
     unique_selling_proposition: Optional[str] = None
 
+class Competitor(CompetitorInfo):
+    """Schema for Competitor model, used for database interactions"""
+    id: str
+    business_idea_id: str
+    key_feature: Optional[str] = None
+    instagram_url: Optional[str] = None
+    facebook_url: Optional[str] = None
+    linkedin_url: Optional[str] = None
+    x_url: Optional[str] = None
+    youtube_url: Optional[str] = None
+    tiktok_url: Optional[str] = None
+    similarity_score: Optional[float] = None
+
+    class Config:
+        from_attributes = True
+
+class GetCompetitorsResponse(BaseModel):
+    business_id: str
+    competitors: List[Competitor]
+
 class CompetitorAnalysisCallback(BaseModel):
     """Callback data from n8n when research is complete"""
     request_id: str = Field(..., description="ID of the original research request")

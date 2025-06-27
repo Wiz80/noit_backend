@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.api import deps
 from app.api.deps import get_db
 from app.models.business.business_idea import BusinessIdea
+from app.models.business.competitive_analysis.competitors import Competitor
 from app.models.business.competitive_analysis.instagram import (
     InstagramUserInfo, 
     InstagramPostInfo,
@@ -515,10 +516,9 @@ async def cancel_comments_analysis(task_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Endpoints para obtener los resultados del análisis
-@router.get("/{business_id}/comment-categories/{username}")
+@router.get("/comment-categories/{competitor_id}")
 async def get_comment_categories(
-    business_id: UUID,
-    username: str,
+    competitor_id: str,
     db: Session = Depends(get_db)
 ):
     """
@@ -533,10 +533,18 @@ async def get_comment_categories(
         dict: Categorías de comentarios con estadísticas
     """
     try:
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
         # Verificar si business_id existe
-        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
+        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(competitor.business_idea_id)).first():
             raise HTTPException(status_code=404, detail="Business idea not found")
         
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.split("/")[-1]
+
         # Verificar si el usuario existe
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
         if not instagram_user:
@@ -545,6 +553,9 @@ async def get_comment_categories(
         # Inicializar servicio MinIO
         minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
+        # get the business_id from the competitor
+        business_id = competitor.business_idea_id
+
         # Ruta del archivo
         file_path = f"{business_id}/competitor-analysis/instagram/{username}/dynamic_categorized_comments.json"
         
@@ -563,10 +574,9 @@ async def get_comment_categories(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{business_id}/sentiment-analysis/{username}")
+@router.get("/sentiment-analysis/{competitor_id}")
 async def get_sentiment_analysis(
-    business_id: UUID,
-    username: str,
+    competitor_id: str,
     db: Session = Depends(get_db)
 ):
     """
@@ -581,9 +591,13 @@ async def get_sentiment_analysis(
         dict: Análisis de sentimiento de los comentarios
     """
     try:
-        # Verificar si business_id existe
-        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
-            raise HTTPException(status_code=404, detail="Business idea not found")
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.split("/")[-1]
         
         # Verificar si el usuario existe
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
@@ -594,7 +608,7 @@ async def get_sentiment_analysis(
         minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Ruta del archivo
-        file_path = f"{business_id}/competitor-analysis/instagram/{username}/sentiment_analysis.json"
+        file_path = f"{competitor.business_idea_id}/competitor-analysis/instagram/{username}/sentiment_analysis.json"
         
         # Obtener datos del archivo
         file_data = minio_service.get_object_data(file_path)
@@ -611,10 +625,9 @@ async def get_sentiment_analysis(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{business_id}/emotion-analysis/{username}")
+@router.get("/emotion-analysis/{competitor_id}")
 async def get_emotion_analysis(
-    business_id: UUID,
-    username: str,
+    competitor_id: str,
     db: Session = Depends(get_db)
 ):
     """
@@ -629,9 +642,13 @@ async def get_emotion_analysis(
         dict: Análisis de emociones de los comentarios
     """
     try:
-        # Verificar si business_id existe
-        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
-            raise HTTPException(status_code=404, detail="Business idea not found")
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.split("/")[-1]
         
         # Verificar si el usuario existe
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
@@ -642,7 +659,7 @@ async def get_emotion_analysis(
         minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Ruta del archivo
-        file_path = f"{business_id}/competitor-analysis/instagram/{username}/emotion_analysis.json"
+        file_path = f"{competitor.business_idea_id}/competitor-analysis/instagram/{username}/emotion_analysis.json"
         
         # Obtener datos del archivo
         file_data = minio_service.get_object_data(file_path)
@@ -659,10 +676,9 @@ async def get_emotion_analysis(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{business_id}/topic-analysis/{username}")
+@router.get("/topic-analysis/{competitor_id}")
 async def get_topic_analysis(
-    business_id: UUID,
-    username: str,
+    competitor_id: str,
     db: Session = Depends(get_db)
 ):
     """
@@ -677,9 +693,13 @@ async def get_topic_analysis(
         dict: Temas identificados en los comentarios
     """
     try:
-        # Verificar si business_id existe
-        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
-            raise HTTPException(status_code=404, detail="Business idea not found")
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.split("/")[-1]
         
         # Verificar si el usuario existe
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
@@ -690,7 +710,7 @@ async def get_topic_analysis(
         minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
         
         # Ruta del archivo
-        file_path = f"{business_id}/competitor-analysis/instagram/{username}/lda_topics.json"
+        file_path = f"{competitor.business_idea_id}/competitor-analysis/instagram/{username}/lda_topics.json"
         
         # Obtener datos del archivo
         file_data = minio_service.get_object_data(file_path)
@@ -707,10 +727,9 @@ async def get_topic_analysis(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{business_id}/combined-analysis/{username}")
+@router.get("/combined-analysis/{competitor_id}")
 async def get_combined_analysis(
-    business_id: UUID,
-    username: str,
+    competitor_id: str,
     db: Session = Depends(get_db)
 ):
     """
@@ -725,9 +744,13 @@ async def get_combined_analysis(
         dict: Análisis combinado con insights
     """
     try:
-        # Verificar si business_id existe
-        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
-            raise HTTPException(status_code=404, detail="Business idea not found")
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.split("/")[-1]
         
         # Verificar si el usuario existe
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
@@ -736,6 +759,9 @@ async def get_combined_analysis(
         
         # Inicializar servicio MinIO
         minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
+        
+        # get the business_id from the competitor
+        business_id = competitor.business_idea_id
         
         # Ruta del archivo
         file_path = f"{business_id}/competitor-analysis/instagram/{username}/combined_analysis_report.json"
@@ -755,10 +781,9 @@ async def get_combined_analysis(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{business_id}/wordcloud/{username}")
+@router.get("/wordcloud/{competitor_id}")
 async def get_wordcloud(
-    business_id: UUID,
-    username: str,
+    competitor_id: str,
     db: Session = Depends(get_db)
 ):
     """
@@ -773,9 +798,13 @@ async def get_wordcloud(
         bytes: Imagen PNG de la nube de palabras
     """
     try:
-        # Verificar si business_id existe
-        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
-            raise HTTPException(status_code=404, detail="Business idea not found")
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.split("/")[-1]
         
         # Verificar si el usuario existe
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
@@ -784,6 +813,9 @@ async def get_wordcloud(
         
         # Inicializar servicio MinIO
         minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
+        
+        # get the business_id from the competitor
+        business_id = competitor.business_idea_id
         
         # Ruta del archivo
         file_path = f"{business_id}/competitor-analysis/instagram/{username}/wordcloud.png"

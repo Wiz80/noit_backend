@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.api import deps
 from app.api.deps import get_db
 from app.models.business.business_idea import BusinessIdea
+from app.models.business.competitive_analysis.competitors import Competitor
 from app.models.business.competitive_analysis.instagram import (
     InstagramUserInfo,
     InstagramPostInfo
@@ -271,10 +272,9 @@ async def complete_statistics_analysis(
             raise
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{business_id}/statistics/{username}")
+@router.get("/statistics/{competitor_id}")
 async def get_statistics(
-    business_id: UUID,
-    username: str,
+    competitor_id: str,
     db: Session = Depends(get_db)
 ):
     """
@@ -289,18 +289,18 @@ async def get_statistics(
         Dict: Statistics data from the generated JSON
     """
     try:
-        # Verify if business_id exists
-        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
-            raise HTTPException(status_code=404, detail="Business idea not found")
+        # Verify if competitor_id exists
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
         
-        # Check if username exists in the database
-        instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
-        if not instagram_user:
-            raise HTTPException(status_code=404, detail=f"Instagram user {username} not found.")
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.split("/")[-1]
         
         # Get statistics data from MinIO
         minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
-        statistics_path = f"{business_id}/competitor-analysis/instagram/{username}/statistics.json"
+        statistics_path = f"{competitor.business_idea_id}/competitor-analysis/instagram/{username}/statistics.json"
         
         statistics_data = minio_service.get_object_data(statistics_path)
         if not statistics_data:

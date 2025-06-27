@@ -12,7 +12,7 @@ from google.auth.transport import requests as google_requests
 from app.core.security import create_access_token
 from app.api import deps
 from app.schemas.user import UserCreate, UserInDBBase
-from app.crud.crud_user import CRUDUser
+from app.api.v1.endpoints.crud.crud_user import CRUDUser
 from app.models.user import User
 from app.core.config import settings
 

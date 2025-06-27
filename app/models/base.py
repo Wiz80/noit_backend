@@ -29,23 +29,3 @@ class Base(DeclarativeBase):
         onupdate=lambda: datetime.now(UTC), 
         nullable=False
     )
-
-# from app.models.user import User
-# from app.models.business.business_idea import BusinessIdea
-# from app.models.business.business_understanding.business_model import BusinessValidation
-# from app.models.business.business_understanding.business_canvas import BusinessCanvas
-# from app.models.business.competitive_analysis.competitors import Competitor
-# from app.models.business.competitive_analysis.instagram import InstagramScrapingJob, InstagramUserInfo, InstagramPostInfo, InstagramPostImage, InstagramImageColor, InstagramUserInsight
-
-# # This will ensure all models are registered with SQLAlchemy
-# __all__ = ['User', 
-#            'BusinessIdea', 
-#            'BusinessValidation', 
-#            'BusinessCanvas',
-#            'Competitor',
-#            'InstagramUserInfo', 
-#            'InstagramPostInfo', 
-#            'InstagramPostImage', 
-#            'InstagramImageColor', 
-#            'InstagramUserInsight',
-#            'InstagramScrapingJob']

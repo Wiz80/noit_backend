@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.api import deps
 from app.schemas.business.business_idea import BusinessIdeaCreate, BusinessIdeaInDBBase
-from app.crud.crud_business_idea import CRUDBusinessIdea
+from app.api.v1.endpoints.crud.crud_business_idea import CRUDBusinessIdea
 from app.models.user import User
 from app.models.business.business_idea import BusinessIdea
 from typing import List

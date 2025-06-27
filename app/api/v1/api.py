@@ -3,7 +3,8 @@ from app.api.v1.endpoints import auth
 from app.api.v1.endpoints.business.business_understanding import business_idea, business_brief, business_brief_websocket, state_of_art
 from app.api.v1.endpoints.business.competitive_analysis import (
     business_competitors, 
-    social_media
+    social_media,
+    competitor_pricing
 )
 from app.api.v1.endpoints.business.competitive_analysis.instagram import (
     instagram,
@@ -80,6 +81,12 @@ api_router.include_router(
     social_media.router,
     prefix="/analyze-competitors/extract-social-media",
     tags=["extract-social-media"]
+)
+
+api_router.include_router(
+    competitor_pricing.router,
+    prefix="/analyze-competitors/pricing",
+    tags=["competitor-pricing"]
 )
 
 api_router.include_router(

@@ -1,7 +1,7 @@
 from typing import Optional
 from sqlalchemy.orm import Session
 from app.core.security import get_password_hash, verify_password
-from app.crud.base import CRUDBase
+from app.api.v1.endpoints.crud.base import CRUDBase
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
 

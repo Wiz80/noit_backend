@@ -1,7 +1,7 @@
 from typing import List, Optional
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
-from app.crud.base import CRUDBase
+from app.api.v1.endpoints.crud.base import CRUDBase
 from app.models.business.business_idea import BusinessIdea
 from app.schemas.business.business_idea import BusinessIdeaCreate, BusinessIdeaUpdate
 

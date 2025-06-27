@@ -8,7 +8,7 @@ from app.core.config import settings
 from app.db.session import SessionLocal
 from app.models.user import User
 from app.core import security
-from app.crud.crud_user import CRUDUser
+from app.api.v1.endpoints.crud.crud_user import CRUDUser
 from app.services.storage.minio_service import MinioService
 from app.services.cache.redis_service import RedisChatService
 import logging

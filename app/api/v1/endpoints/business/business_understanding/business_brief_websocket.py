@@ -18,7 +18,7 @@ from app.controllers.business_understanding.brief_controller import BriefControl
 from app.models.user import User
 from app.models.business.business_idea import BusinessIdea
 from app.models.business.business_understanding.business_model import BusinessModel
-from app.crud.crud_user import CRUDUser
+from app.api.v1.endpoints.crud.crud_user import CRUDUser
 from app.core.config import settings
 
 # Configure logger

@@ -496,3 +496,34 @@ async def list_researches(
                 "message": f"Error listing researches: {str(e)}"
             }
         )
+    
+@router.get("/{business_id}/competitors")
+async def get_competitors(
+    business_id: str,
+    db: Session = Depends(deps.get_db)
+) -> JSONResponse:
+    """
+    Get the competitors for a business
+    """
+    try:
+        competitors = db.query(Competitor).filter(Competitor.business_id == business_id).all()
+        # return an object of list of Competitor where the key is the competitor_id and the value is the competitor object 
+        # with every field of the competitor object
+        competitors_dict = {}
+        for competitor in competitors:
+            competitors_dict[competitor.id] = competitor.model_dump()
+        return JSONResponse(
+            status_code=200,
+            content={
+                "business_id": business_id,
+                "competitors": competitors_dict
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error getting competitors: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "message": f"Error getting competitors: {str(e)}"
+            }
+        )

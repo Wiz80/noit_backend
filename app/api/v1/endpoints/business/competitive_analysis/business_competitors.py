@@ -505,8 +505,7 @@ async def list_researches(
 @router.get("/{business_id}/competitors", response_model=GetCompetitorsResponse)
 async def get_competitors(
     business_id: str,
-    db: Session = Depends(deps.get_db),
-    current_user: User = Depends(deps.get_current_active_user)
+    db: Session = Depends(deps.get_db)
 ) -> Any:
     """
     Get the competitors for a business.

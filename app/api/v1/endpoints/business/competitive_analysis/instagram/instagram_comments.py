@@ -543,8 +543,13 @@ async def get_comment_categories(
         
         # get the username from the competitor
         # example: https://www.instagram.com/intel
-        username = competitor.instagram_url.split("/")[-1]
+        # take into account this case: https://www.instagram.com/intel/ with final /
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
 
+        # if the username is empty, raise an error
+        if not username:
+            raise HTTPException(status_code=404, detail="Username not found")
+        
         # Verificar si el usuario existe
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
         if not instagram_user:
@@ -597,7 +602,7 @@ async def get_sentiment_analysis(
         
         # get the username from the competitor
         # example: https://www.instagram.com/intel
-        username = competitor.instagram_url.split("/")[-1]
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
         
         # Verificar si el usuario existe
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
@@ -648,7 +653,7 @@ async def get_emotion_analysis(
         
         # get the username from the competitor
         # example: https://www.instagram.com/intel
-        username = competitor.instagram_url.split("/")[-1]
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
         
         # Verificar si el usuario existe
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
@@ -699,7 +704,7 @@ async def get_topic_analysis(
         
         # get the username from the competitor
         # example: https://www.instagram.com/intel
-        username = competitor.instagram_url.split("/")[-1]
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
         
         # Verificar si el usuario existe
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
@@ -750,7 +755,7 @@ async def get_combined_analysis(
         
         # get the username from the competitor
         # example: https://www.instagram.com/intel
-        username = competitor.instagram_url.split("/")[-1]
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
         
         # Verificar si el usuario existe
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
@@ -804,7 +809,7 @@ async def get_wordcloud(
         
         # get the username from the competitor
         # example: https://www.instagram.com/intel
-        username = competitor.instagram_url.split("/")[-1]
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
         
         # Verificar si el usuario existe
         instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()

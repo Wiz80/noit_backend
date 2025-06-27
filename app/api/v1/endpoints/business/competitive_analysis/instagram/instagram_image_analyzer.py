@@ -341,7 +341,7 @@ async def get_posts_image_analysis(
         
         # get the username from the competitor
         # example: https://www.instagram.com/intel
-        username = competitor.instagram_url.split("/")[-1]
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
         
         # Get data from MinIO
         from app.services.storage.minio_service import MinioService

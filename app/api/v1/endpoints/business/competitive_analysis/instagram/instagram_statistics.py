@@ -296,7 +296,7 @@ async def get_statistics(
         
         # get the username from the competitor
         # example: https://www.instagram.com/intel
-        username = competitor.instagram_url.split("/")[-1]
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
         
         # Get statistics data from MinIO
         minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)

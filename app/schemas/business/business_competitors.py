@@ -39,11 +39,13 @@ class CompetitorInfo(BaseModel):
     pricing_strategy: Optional[str] = None
     unique_selling_proposition: Optional[str] = None
 
-class Competitor(CompetitorInfo):
-    """Schema for Competitor model, used for database interactions"""
+class Competitor(BaseModel):
+    """Schema for the Competitor SQLAlchemy model, used for API responses."""
     id: str
     business_idea_id: str
+    competitor_name: str
     key_feature: Optional[str] = None
+    website: Optional[str] = None
     instagram_url: Optional[str] = None
     facebook_url: Optional[str] = None
     linkedin_url: Optional[str] = None

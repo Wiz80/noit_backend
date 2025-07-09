@@ -57,15 +57,36 @@ class InstagramSentimentEmotionAnalyzer(BaseInstagramAnalyzer):
         try:
             comments_list = []
             
-            # Definir la ruta del archivo de comentarios procesados
+            # Try the correct path first
             processed_comments_path = f"{self.output_folder}/{self.username}/processed_comments_data.json"
             logger.debug(f"Buscando comentarios procesados en: {processed_comments_path}")
             
             # Obtener los datos del archivo - sin usar await ya que get_object_data devuelve directamente bytes
             comments_data = self.minio_service.get_object_data(processed_comments_path)
+            
+            # If not found, try alternative legacy paths for backward compatibility
             if not comments_data:
-                logger.warning(f"No se encontraron comentarios procesados en {processed_comments_path}")
-                return []
+                logger.warning(f"No se encontraron comentarios en la ruta principal: {processed_comments_path}")
+                
+                # Try legacy path 1: with 'businesses' prefix
+                legacy_path_1 = f"businesses/{self.output_folder}/{self.username}/processed_comments_data.json"
+                logger.debug(f"Intentando ruta legacy 1: {legacy_path_1}")
+                comments_data = self.minio_service.get_object_data(legacy_path_1)
+                
+                if comments_data:
+                    logger.info(f"✅ Datos encontrados en ruta legacy 1: {legacy_path_1}")
+                else:
+                    # Try legacy path 2: old instagram structure
+                    business_id = self.output_folder.split('/')[0] if '/' in self.output_folder else self.output_folder
+                    legacy_path_2 = f"businesses/{business_id}/instagram/{self.username}/processed_comments_data.json"
+                    logger.debug(f"Intentando ruta legacy 2: {legacy_path_2}")
+                    comments_data = self.minio_service.get_object_data(legacy_path_2)
+                    
+                    if comments_data:
+                        logger.info(f"✅ Datos encontrados en ruta legacy 2: {legacy_path_2}")
+                    else:
+                        logger.warning(f"No se encontraron comentarios procesados en ninguna ruta")
+                        return []
             
             # Parsear el JSON (puede ser un diccionario {post_id: {...}} o una lista de posts)
             posts_data = json.loads(comments_data.decode('utf-8'))

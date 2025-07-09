@@ -67,7 +67,7 @@ class SentimentAnalysisResponse(BaseModel):
     emotion_file_path: str
 
 class TopicModelingRequest(BaseModel):
-    username: str
+    competitor_id: str
     num_topics: int = 5
     lang: str = "en"
 
@@ -86,6 +86,8 @@ class CompleteCommentsAnalysisRequest(BaseModel):
     model: str = "openai:gpt-4o-mini"
     lang: str = "en"
     run_in_background: bool = True
+
+
 
 # Import settings
 from app.core.config import settings
@@ -255,8 +257,8 @@ async def analyze_sentiment_emotions(
             status="success",
             username=request.username,
             total_comments_analyzed=total_comments,
-            sentiment_file_path=f"{output_folder}/sentiment_analysis.json",
-            emotion_file_path=f"{output_folder}/emotion_analysis.json"
+            sentiment_file_path=f"{output_folder}/{request.username}/sentiment_analysis.json",
+            emotion_file_path=f"{output_folder}/{request.username}/emotion_analysis.json"
         )
 
     except Exception as e:
@@ -269,11 +271,11 @@ async def model_comment_topics(
     db: Session = Depends(get_db)
 ):
     """
-    Perform topic modeling on Instagram comments for a specific username.
+    Perform topic modeling on Instagram comments for a specific competitor.
     
     Args:
         business_id: UUID of the business idea
-        request: TopicModelingRequest with username, num_topics, and language
+        request: TopicModelingRequest with competitor_id, num_topics, and language
         db: Database session
         
     Returns:
@@ -284,15 +286,44 @@ async def model_comment_topics(
         if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
             raise HTTPException(status_code=404, detail="Business idea not found")
         
+        # Get competitor and verify it belongs to this business
+        competitor = db.query(Competitor).filter(
+            Competitor.id == request.competitor_id,
+            Competitor.business_idea_id == str(business_id)
+        ).first()
+        
+        if not competitor:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Competitor with ID {request.competitor_id} not found for business {business_id}"
+            )
+        
+        # Verify competitor has Instagram URL
+        if not competitor.instagram_url:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Competitor '{competitor.competitor_name}' does not have an Instagram URL"
+            )
+        
+        # Extract username from Instagram URL
+        instagram_url = competitor.instagram_url.rstrip("/")
+        username = instagram_url.split("/")[-1]
+        
+        if not username:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not extract username from Instagram URL: {competitor.instagram_url}"
+            )
+        
         # Check if username exists in the database
-        instagram_user = db.query(InstagramUserInfo).filter_by(username=request.username).first()
+        instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
         if not instagram_user:
-            raise HTTPException(status_code=404, detail=f"Instagram user {request.username} not found. You may need to scrape this profile first.")
+            raise HTTPException(status_code=404, detail=f"Instagram user {username} not found. You may need to scrape this profile first.")
         
         # Initialize the topic modeling analyzer
         output_folder = f"{business_id}/competitor-analysis/instagram"
         topic_modeling = InstagramTopicModeling(
-            username=request.username,
+            username=username,
             output_folder=output_folder,
             num_topics=request.num_topics,
             lang=request.lang
@@ -306,14 +337,16 @@ async def model_comment_topics(
         
         return TopicModelingResponse(
             status="success",
-            username=request.username,
+            username=username,
             total_topics=topics_count if topics_count else request.num_topics,
-            lda_topics_file_path=f"{output_folder}/lda_topics.json",
-            wordcloud_file_path=f"{output_folder}/wordcloud.png"
+            lda_topics_file_path=f"{output_folder}/{username}/lda_topics.json",
+            wordcloud_file_path=f"{output_folder}/{username}/wordcloud.json"
         )
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 @router.post("/{business_id}/complete-comments-analysis")
 async def complete_comments_analysis(
@@ -792,15 +825,14 @@ async def get_wordcloud(
     db: Session = Depends(get_db)
 ):
     """
-    Obtiene la imagen de nube de palabras (wordcloud) para un usuario de Instagram específico.
+    Obtiene los datos de frecuencia de palabras (wordcloud) para un usuario de Instagram específico.
     
     Args:
-        business_id: UUID del business idea
-        username: Nombre de usuario de Instagram analizado
+        competitor_id: ID del competidor a analizar
         db: Sesión de base de datos
         
     Returns:
-        bytes: Imagen PNG de la nube de palabras
+        dict: Datos JSON con frecuencias de palabras
     """
     try:
         competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
@@ -822,18 +854,18 @@ async def get_wordcloud(
         # get the business_id from the competitor
         business_id = competitor.business_idea_id
         
-        # Ruta del archivo
-        file_path = f"{business_id}/competitor-analysis/instagram/{username}/wordcloud.png"
+        # Ruta del archivo JSON
+        file_path = f"{business_id}/competitor-analysis/instagram/{username}/wordcloud.json"
         
         # Obtener datos del archivo
         file_data = minio_service.get_object_data(file_path)
         if not file_data:
-            raise HTTPException(status_code=404, detail="Wordcloud image not found")
+            raise HTTPException(status_code=404, detail="Wordcloud data not found")
         
-        # Devolver la imagen
+        # Devolver los datos JSON
         return Response(
             content=file_data,
-            media_type="image/png"
+            media_type="application/json"
         )
     except HTTPException:
         raise

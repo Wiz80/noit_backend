@@ -1,9 +1,7 @@
 import json
 import re
 import spacy
-import matplotlib.pyplot as plt
 from collections import Counter
-from wordcloud import WordCloud
 from gensim import corpora, models
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
@@ -11,7 +9,6 @@ import nltk
 import numpy as np
 from app.services.storage.minio_service import MinioService
 from app.db.session import SessionLocal
-from io import BytesIO
 from app.services.business.competitive_analysis.instagram.base_instagram_module import BaseInstagramAnalyzer
 from app.models.business.competitive_analysis.instagram import InstagramUserInfo, InstagramLDATopic
 
@@ -48,6 +45,7 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
                 self.nlp = spacy.blank("en")
         
         nltk.download('punkt')
+        nltk.download('punkt_tab')
         nltk.download('stopwords')
         
         # Initialize LLM using LangChain with Claude as default
@@ -116,8 +114,29 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
             raw_comments_path = f"{self.output_folder}/{self.username}/processed_comments_data.json"
             raw_comments_data = self.minio_service.get_object_data(raw_comments_path)
             
+            # If not found, try alternative legacy paths for backward compatibility
+            if not raw_comments_data:
+                print(f"⚠️ No raw comments found at primary path: {raw_comments_path}")
+                
+                # Try legacy path 1: with 'businesses' prefix
+                legacy_path_1 = f"businesses/{self.output_folder}/{self.username}/processed_comments_data.json"
+                print(f"🔍 Trying legacy path 1: {legacy_path_1}")
+                raw_comments_data = self.minio_service.get_object_data(legacy_path_1)
+                
+                if raw_comments_data:
+                    print(f"✅ Found raw comments at legacy path 1: {legacy_path_1}")
+                else:
+                    # Try legacy path 2: old instagram structure
+                    business_id = self.output_folder.split('/')[0] if '/' in self.output_folder else self.output_folder
+                    legacy_path_2 = f"businesses/{business_id}/instagram/{self.username}/processed_comments_data.json"
+                    print(f"🔍 Trying legacy path 2: {legacy_path_2}")
+                    raw_comments_data = self.minio_service.get_object_data(legacy_path_2)
+                    
+                    if raw_comments_data:
+                        print(f"✅ Found raw comments at legacy path 2: {legacy_path_2}")
+            
             if raw_comments_data:
-                print(f"📂 Found raw comments in MinIO: {raw_comments_path}")
+                print(f"📂 Found raw comments in MinIO")
                 posts_data = json.loads(raw_comments_data.decode('utf-8'))
                 
                 # Extract comments from raw data
@@ -219,32 +238,64 @@ class InstagramTopicModeling(BaseInstagramAnalyzer):
         return lda_model, corpus, dictionary, topics_dict
 
     async def generate_wordcloud(self, processed_comments):
-        """Generates a word cloud from processed comments and saves it to MinIO."""
+        """Generates word frequency data from processed comments and saves it as JSON to MinIO."""
         try:
-            all_words = " ".join([" ".join(comment) for comment in processed_comments])
-            wordcloud = WordCloud(width=800, height=400, background_color="white").generate(all_words)
+            # Extract all words from processed comments
+            all_words = []
+            for comment in processed_comments:
+                if isinstance(comment, list):
+                    all_words.extend(comment)
+                elif isinstance(comment, str):
+                    all_words.extend(comment.split())
+            
+            # Count word frequencies
+            word_freq = Counter(all_words)
+            
+            # Get top 100 most common words (you can adjust this number)
+            top_words = word_freq.most_common(100)
+            
+            # Create wordcloud data structure
+            wordcloud_data = {
+                "metadata": {
+                    "username": self.username,
+                    "total_words": len(all_words),
+                    "unique_words": len(word_freq),
+                    "top_words_count": len(top_words),
+                    "generated_at": str(np.datetime64('now'))
+                },
+                "word_frequencies": {
+                    word: freq for word, freq in top_words
+                },
+                "word_frequencies_list": [
+                    {
+                        "word": word,
+                        "frequency": freq,
+                        "relative_frequency": round(freq / len(all_words), 4)
+                    }
+                    for word, freq in top_words
+                ]
+            }
 
-            plt.figure(figsize=(10, 5))
-            plt.imshow(wordcloud, interpolation="bilinear")
-            plt.axis("off")
-            plt.title("🌟 Nube de Palabras de Comentarios", fontsize=14)
+            # Convert to JSON
+            wordcloud_json = json.dumps(wordcloud_data, indent=2, ensure_ascii=False)
 
-            img_buffer = BytesIO()
-            plt.savefig(img_buffer, format='png')
-            plt.close()
-
-            img_buffer.seek(0)
-            image_data = img_buffer.getvalue()
-
+            # Save to MinIO
             await self.minio_service.upload_content(
-                object_name=f"{self.output_folder}/{self.username}/wordcloud.png",
-                data=image_data,
-                content_type="image/png"
+                object_name=f"{self.output_folder}/{self.username}/wordcloud.json",
+                data=wordcloud_json.encode('utf-8'),
+                content_type="application/json"
             )
 
-            print(f"✅ WordCloud saved in MinIO: {self.output_folder}/{self.username}/wordcloud.png")
+            print(f"✅ WordCloud JSON saved in MinIO: {self.output_folder}/{self.username}/wordcloud.json")
+            print(f"📊 Generated wordcloud with {len(top_words)} words from {len(all_words)} total words")
+            
+            return wordcloud_data
+            
         except Exception as e:
-            print(f"❌ Error generating WordCloud: {e}")
+            print(f"❌ Error generating WordCloud JSON: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     async def save_topics_to_json(self, topics_dict):
         """Saves the detected topics and statistics as a JSON file in MinIO and in the database."""

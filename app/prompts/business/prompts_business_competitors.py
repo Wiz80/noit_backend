@@ -45,7 +45,9 @@ def create_parsing_prompt_competitors(lang, raw_response):
         - Validar URLs correctamente
         - Asegurar scores entre 1-100
         - Manejar valores null apropiadamente
-        
+        - ASEGÚRATE de que cada objeto en la lista de competidores esté seguido por una coma, excepto el último.
+        - Si algún valor de string contiene comillas dobles, DEBEN estar escapadas con un backslash (ej: "esta es una \\"cita\\"").
+
         MAPEO DE CAMPOS OBLIGATORIO:
         - "name" → "competitor_name"
         - "valueProposition" → "key_feature" 
@@ -85,6 +87,8 @@ def create_parsing_prompt_competitors(lang, raw_response):
         - Asegura que similarity_score sea número
         - Valida que las URLs sean correctas o null
         - Asegurate que los keys del json estén exactamente como se especifica
+        - Make sure every object in the competitors list is followed by a comma, except for the last one.
+        - If any string value contains double quotes, they MUST be escaped with a backslash (e.g., "this is a \\"quote\\"").
         
         """
     else:
@@ -143,6 +147,8 @@ def create_parsing_prompt_competitors(lang, raw_response):
         - Ensure that similarity_score is a number
         - Validate that URLs are correct or null
         - Ensure keys are exactly as specified
+        - Make sure every object in the competitors list is followed by a comma, except for the last one.
+        - If any string value contains double quotes, they MUST be escaped with a backslash (e.g., "this is a \\"quote\\"").
         """
     
 

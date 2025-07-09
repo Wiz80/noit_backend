@@ -77,6 +77,20 @@ def get_minio_client() -> MinioService:
         logging.info("MinioService instance created (lazy loading - not connected yet)")
     return _minio_service_instance
 
+# Create a singleton instance for the research bucket
+_minio_research_service_instance = None
+
+def get_minio_research_client() -> MinioService:
+    """
+    Returns a MinioService instance for handling research storage operations.
+    """
+    global _minio_research_service_instance
+    if _minio_research_service_instance is None:
+        # Create a new service object pointing to the research bucket
+        _minio_research_service_instance = MinioService(bucket_name=settings.MINIO_RESEARCH_BUCKET_NAME)
+        logging.info(f"Research MinioService instance created for bucket {settings.MINIO_RESEARCH_BUCKET_NAME}")
+    return _minio_research_service_instance
+
 # Create a singleton instance of RedisChatService
 _redis_service_instance = None
 

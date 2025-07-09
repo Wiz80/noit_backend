@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from openai import OpenAI
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import uuid
 from uuid import UUID
@@ -20,10 +20,6 @@ from app.models.business.business_idea import BusinessIdea
 from app.models.business.competitive_analysis.competitors import Competitor
 from app.models.business.competitive_analysis.instagram import InstagramScrapingJob, InstagramUserInfo
 from app.controllers.competitive_analysis.instagram_competitor_controller import InstagramCompetitorController
-from app.services.business.competitive_analysis.instagram.comments.instagram_comment_categorizer import InstagramCommentCategorizer
-from app.services.business.competitive_analysis.instagram.comments.instagram_topic_modeling import InstagramTopicModeling
-from app.services.business.competitive_analysis.instagram.comments.instagram_sentiment_emotion_analyzer import InstagramSentimentEmotionAnalyzer
-from app.services.business.competitive_analysis.instagram.instagram_scraper import InstagramScraper
 from app.services.search.dynamic_research_ai import ResearchModule, ResearchConfig
 from app.prompts.business.prompts_business_competitors import create_validation_competitor_prompt
 from app.models.user import User
@@ -32,6 +28,16 @@ from app.models.user import User
 from app.tasks.instagram_analysis_tasks import run_instagram_full_analysis_task
 # Import task progress service
 from app.services.cache.task_progress_service import get_task_progress_service
+
+# Import for Instagram URL correction
+from app.schemas.business.business_competitors import (
+    InstagramCorrectionRequest,
+    InstagramCorrectionResponse,
+    CorrectedInstagramUrl
+)
+from app.services.llm.langchain_factory import LangChainLLMFactory
+from langchain_core.messages import HumanMessage
+import re
 
 import logging
 logger = logging.getLogger(__name__)
@@ -57,21 +63,7 @@ class CompetitorAnalysisRequest(BaseModel):
     # Remove competitor_ids since we'll get the competitor_id from the URL
     pass
 
-# Schema for comment analysis request
-class CommentAnalysisRequest(BaseModel):
-    username: str
-    analysis_types: List[str] = ["categorization", "sentiment", "topics"]
-    language: str = "es"
-    num_topics: int = 5
-    provider: str = "openai"
-    model: str = "gpt-4o-mini"
 
-# Schema for comment analysis response
-class CommentAnalysisResponse(BaseModel):
-    username: str
-    analysis_types: List[str]
-    status: str
-    results: Optional[dict]
 
 # Schema for research callback request
 class ResearchCallbackRequest(BaseModel):
@@ -319,168 +311,267 @@ async def cancel_instagram_analysis(task_id: str, db: Session = Depends(get_db))
 
     return {"message": "Instagram analysis cancelled successfully"}
 
-@router.post("/{business_id}/analyze-comments", response_model=CommentAnalysisResponse)
-async def analyze_instagram_comments(
+
+
+@router.post("/{business_id}/correct-instagram-urls", response_model=InstagramCorrectionResponse)
+async def correct_competitor_instagram_urls(
     business_id: UUID,
-    request: CommentAnalysisRequest,
-    db: Session = Depends(get_db)
+    request: InstagramCorrectionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(deps.get_current_active_superuser)
 ):
     """
-    Perform detailed analysis of Instagram comments for a specific username.
+    Correct or find Instagram URLs for competitors using OpenAI LLM.
+    
+    IMPORTANT: If competitor_ids is not provided or empty, this endpoint will process 
+    ALL competitors for the given business_id. This is the default behavior.
+    
+    The LLM will use the competitor's name and website to find the correct Instagram URL.
     
     Args:
         business_id: UUID of the business idea
-        request: Analysis request parameters including username and analysis types
+        request: InstagramCorrectionRequest with:
+            - competitor_ids (optional): List of specific competitor IDs to correct.
+              If empty/null, ALL competitors for this business will be processed.
+            - force_update (optional): Whether to force update already existing Instagram URLs
         db: Database session
+        current_user: Current active superuser
         
     Returns:
-        CommentAnalysisResponse: Analysis results and status
+        InstagramCorrectionResponse: Correction results with detailed scope information
     """
     try:
+        logger.info(f"🔧 Starting Instagram URL correction for business {business_id}")
+        logger.info(f"🎯 Request: competitor_ids={request.competitor_ids}, force_update={request.force_update}")
+        
         # Verify if business_id exists
-        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
+        business_idea = db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first()
+        if not business_idea:
             raise HTTPException(status_code=404, detail="Business idea not found")
+
+        # Determine scope: specific competitors or all competitors for this business
+        if request.competitor_ids and len(request.competitor_ids) > 0:
+            # Process only specific competitor IDs provided
+            logger.info(f"🎯 Processing specific competitors: {len(request.competitor_ids)} IDs provided")
+            query = db.query(Competitor).filter(
+                Competitor.business_idea_id == str(business_id),
+                Competitor.id.in_(request.competitor_ids)
+            )
+            scope_message = f"specific {len(request.competitor_ids)} competitors"
+        else:
+            # Process ALL competitors for this business (default behavior)
+            logger.info(f"🌍 Processing ALL competitors for business {business_id} (no specific IDs provided)")
+            query = db.query(Competitor).filter(
+                Competitor.business_idea_id == str(business_id)
+            )
+            scope_message = "all competitors for this business"
+            
+        competitors = query.all()
+
+        if not competitors:
+            error_msg = f"No competitors found for {scope_message}"
+            logger.warning(f"⚠️ {error_msg}")
+            raise HTTPException(status_code=404, detail=error_msg)
+
+        # Filter competitors that need Instagram URL correction
+        competitors_to_correct = []
+        competitors_already_have_instagram = 0
+        competitors_without_data = 0
         
-        # Check if username exists in the database
-        instagram_user = db.query(InstagramUserInfo).filter_by(username=request.username).first()
-        if not instagram_user:
-            raise HTTPException(status_code=404, detail=f"Instagram user {request.username} not found. You may need to scrape this profile first.")
-        
-        output_folder = f"businesses/{business_id}/instagram/{request.username}"
-        results = {}
-        
-        # Perform requested analyses
-        for analysis_type in request.analysis_types:
-            try:
-                if analysis_type == "categorization":
-                    # Run comment categorization
-                    comment_categorizer = InstagramCommentCategorizer(
-                        username=request.username,
-                        output_folder=output_folder,
-                        provider=request.provider,
-                        model=request.model
-                    )
-                    categories = await comment_categorizer.run_analysis()
-                    results["categorization"] = {
-                        "status": "completed",
-                        "categories_count": categories if categories else 0
-                    }
+        for comp in competitors:
+            # Check if competitor has enough data (name at least)
+            if not comp.competitor_name:
+                competitors_without_data += 1
+                continue
                 
-                elif analysis_type == "topics":
-                    # Run topic modeling
-                    topic_modeling = InstagramTopicModeling(
-                        username=request.username,
-                        output_folder=output_folder,
-                        num_topics=request.num_topics,
-                        lang=request.language
-                    )
-                    await topic_modeling.run_lda_analysis()
-                    results["topics"] = {
-                        "status": "completed",
-                        "topics_count": request.num_topics,
-                        "wordcloud_path": f"{output_folder}/wordcloud.png",
-                        "topics_json_path": f"{output_folder}/lda_topics.json"
-                    }
+            # Skip if already has Instagram URL and force_update is False
+            if comp.instagram_url and not request.force_update:
+                competitors_already_have_instagram += 1
+                continue
                 
-                elif analysis_type == "sentiment":
-                    # Run sentiment and emotion analysis
-                    sentiment_analyzer = InstagramSentimentEmotionAnalyzer(
-                        username=request.username,
-                        output_folder=output_folder
-                    )
-                    await sentiment_analyzer.analyze_sentiment_and_emotions()
-                    results["sentiment"] = {
-                        "status": "completed",
-                        "sentiment_path": f"{output_folder}/sentiment_analysis.json",
-                        "emotion_path": f"{output_folder}/emotion_analysis.json"
-                    }
+            competitors_to_correct.append(comp)
+
+        logger.info(f"📊 Analysis results for {scope_message}:")
+        logger.info(f"   - Total competitors: {len(competitors)}")
+        logger.info(f"   - Need Instagram URL: {len(competitors_to_correct)}")
+        logger.info(f"   - Already have Instagram: {competitors_already_have_instagram}")
+        logger.info(f"   - Without sufficient data: {competitors_without_data}")
+
+        if not competitors_to_correct:
+            success_message = f"All competitors already have Instagram URLs for {scope_message}"
+            logger.info(f"✅ {success_message}")
+            return InstagramCorrectionResponse(
+                business_id=str(business_id),
+                total_competitors=len(competitors),
+                corrected_count=0,
+                skipped_count=len(competitors),
+                corrected_instagram_urls=[],
+                success=True,
+                message=success_message
+            )
+
+        # Prepare data for LLM correction
+        competitors_data = []
+        for comp in competitors_to_correct:
+            competitors_data.append({
+                "competitor_id": comp.id,
+                "competitor_name": comp.competitor_name,
+                "website": comp.website,
+                "current_instagram_url": comp.instagram_url
+            })
+
+        # Call LLM to find Instagram URLs
+        corrected_data = await _find_instagram_urls_with_llm(competitors_data)
+        
+        # Process results and update database
+        corrected_instagram_urls = []
+        corrected_count = 0
+        
+        for correction in corrected_data.get("corrected_instagram_urls", []):
+            competitor_id = correction.get("competitor_id")
+            new_instagram_url = correction.get("instagram_url")
+            confidence = correction.get("confidence_score", 0.7)
+            reasoning = correction.get("reasoning", "")
+            
+            # Find the competitor in the database
+            competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+            if competitor:
+                original_instagram_url = competitor.instagram_url
+                was_corrected = original_instagram_url != new_instagram_url
                 
-            except Exception as e:
-                results[analysis_type] = {
-                    "status": "failed",
-                    "error": str(e)
-                }
+                # Update Instagram URL in database if it was found/corrected
+                if was_corrected and new_instagram_url:
+                    competitor.instagram_url = new_instagram_url
+                    corrected_count += 1
+                
+                corrected_instagram_urls.append(CorrectedInstagramUrl(
+                    competitor_id=competitor_id,
+                    competitor_name=competitor.competitor_name,
+                    competitor_website=competitor.website,
+                    original_instagram_url=original_instagram_url,
+                    corrected_instagram_url=new_instagram_url,
+                    was_corrected=was_corrected,
+                    confidence_score=confidence,
+                    reasoning=reasoning
+                ))
+
+        # Commit database changes
+        db.commit()
         
-        # Create or update analysis job record in database if needed
-        # (You could track analysis jobs similar to scraping jobs)
-        
-        return CommentAnalysisResponse(
-            username=request.username,
-            analysis_types=request.analysis_types,
-            status="completed" if all(result.get("status") == "completed" for result in results.values()) else "partial",
-            results=results
+        final_message = f"Successfully found/corrected {corrected_count} Instagram URLs for {scope_message}"
+        logger.info(f"✅ {final_message}")
+
+        return InstagramCorrectionResponse(
+            business_id=str(business_id),
+            total_competitors=len(competitors),
+            corrected_count=corrected_count,
+            skipped_count=len(competitors) - len(competitors_to_correct),
+            corrected_instagram_urls=corrected_instagram_urls,
+            success=True,
+            message=final_message
         )
 
     except Exception as e:
+        logger.error(f"❌ Error correcting Instagram URLs for business {business_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Also add an endpoint to analyze comments for multiple Instagram accounts at once
-@router.post("/{business_id}/analyze-multiple-accounts", response_model=List[CommentAnalysisResponse])
-async def analyze_multiple_instagram_accounts(
-    business_id: UUID,
-    usernames: List[str],
-    analysis_types: List[str] = ["categorization", "sentiment", "topics"],
-    language: str = "es",
-    num_topics: int = 5,
-    provider: str = "openai",
-    model: str = "gpt-4-0125-preview",
-    db: Session = Depends(get_db)
-):
+
+async def _find_instagram_urls_with_llm(competitors_data: List[Dict[str, str]]) -> Dict[str, Any]:
     """
-    Perform detailed analysis of Instagram comments for multiple usernames.
+    Find Instagram URLs for competitors using OpenAI LLM.
     
     Args:
-        business_id: UUID of the business idea
-        usernames: List of Instagram usernames to analyze
-        analysis_types: Types of analysis to perform
-        language: Language of the comments
-        num_topics: Number of topics for LDA analysis
-        provider: LLM provider for categorization
-        model: LLM model for categorization
-        db: Database session
+        competitors_data: List of dictionaries with competitor information
         
     Returns:
-        List[CommentAnalysisResponse]: Analysis results and status for each username
+        Dictionary with Instagram URLs data
     """
     try:
-        # Verify if business_id exists
-        if not db.query(BusinessIdea).filter(BusinessIdea.id == str(business_id)).first():
-            raise HTTPException(status_code=404, detail="Business idea not found")
+        # Initialize OpenAI LLM
+        max_tokens = min(4000, len(competitors_data) * 300 + 500)  # Dynamic token calculation
+        llm = LangChainLLMFactory.create_llm(
+            provider="openai",
+            model="gpt-4o-mini",
+            temperature=0.1,
+            max_tokens=max_tokens
+        )
         
-        results = []
+        logger.info(f"🤖 LLM initialized with {max_tokens} max_tokens for {len(competitors_data)} competitors")
         
-        for username in usernames:
-            # Process each username
-            try:
-                request = CommentAnalysisRequest(
-                    username=username,
-                    analysis_types=analysis_types,
-                    language=language,
-                    num_topics=num_topics,
-                    provider=provider,
-                    model=model
-                )
-                
-                response = await analyze_instagram_comments(business_id, request, db)
-                results.append(response)
-                
-            except HTTPException as http_exc:
-                # If a specific username fails, add error to results but continue with others
-                results.append(CommentAnalysisResponse(
-                    username=username,
-                    analysis_types=analysis_types,
-                    status="failed",
-                    results={"error": http_exc.detail}
-                ))
-            except Exception as e:
-                results.append(CommentAnalysisResponse(
-                    username=username,
-                    analysis_types=analysis_types,
-                    status="failed",
-                    results={"error": str(e)}
-                ))
+        # Prepare the input data for the prompt
+        competitors_input = []
+        for item in competitors_data:
+            competitors_input.append({
+                "competitor_id": item["competitor_id"],
+                "competitor_name": item["competitor_name"],
+                "website": item["website"],
+                "current_instagram_url": item.get("current_instagram_url")
+            })
         
-        return results
+        # Create the Instagram URL finding prompt
+        prompt_template = """You are an expert at finding social media accounts for businesses and brands. I will provide you with a list of competitors and you need to find their Instagram URLs.
+
+IMPORTANT INSTRUCTIONS:
+1. Use the competitor name and website to determine the most likely Instagram account
+2. Instagram URLs should be in format: https://instagram.com/username or https://www.instagram.com/username
+3. If you're confident about the Instagram account, provide it
+4. If you cannot confidently determine the Instagram account, set instagram_url to null
+5. Assign a confidence_score between 0.0 and 1.0 based on how confident you are
+6. Provide reasoning for your decision
+7. Consider common patterns: company names, brand names, website domains without extensions
+8. Look for verified or business accounts when possible
+
+INPUT DATA:
+{competitors_input}
+
+OUTPUT FORMAT (JSON only, no additional text):
+{{
+  "corrected_instagram_urls": [
+    {{
+      "competitor_id": "competitor_id_here",
+      "competitor_name": "Company Name",
+      "website": "https://website.com",
+      "instagram_url": "https://instagram.com/username_or_null",
+      "confidence_score": 0.85,
+      "reasoning": "Based on company name and website domain, this is likely their Instagram account"
+    }}
+  ]
+}}
+
+EXAMPLES OF GOOD REASONING:
+- "Company name matches Instagram handle exactly"
+- "Website domain matches Instagram username pattern"  
+- "Well-known brand with verified Instagram account"
+- "Common business naming pattern suggests this handle"
+- "Could not confidently identify - multiple possibilities exist"
+- "No clear Instagram presence found for this competitor"
+
+Remember: Output ONLY the JSON, no explanations or markdown."""
+
+        formatted_prompt = prompt_template.format(competitors_input=json.dumps(competitors_input, indent=2))
         
+        # Make the LLM call
+        response = llm.invoke([HumanMessage(content=formatted_prompt)])
+        response_content = response.content.strip()
+        
+        # Clean and parse the JSON response
+        if response_content.startswith("```json"):
+            response_content = response_content[7:]
+        if response_content.endswith("```"):
+            response_content = response_content[:-3]
+        
+        response_content = response_content.strip()
+        
+        try:
+            corrected_data = json.loads(response_content)
+            logger.info(f"✅ LLM successfully found Instagram URLs for {len(corrected_data.get('corrected_instagram_urls', []))} competitors")
+            return corrected_data
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Failed to parse LLM JSON response: {e}")
+            logger.error(f"Response content length: {len(response_content)} chars")
+            logger.error(f"Response content preview: {response_content[:500]}...")
+            raise ValueError(f"Invalid JSON response from LLM: {e}")
+            
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Error in LLM Instagram URL finding: {str(e)}")
+        raise ValueError(f"LLM Instagram URL finding failed: {str(e)}")

@@ -149,7 +149,7 @@ async def test_instagram_topic_modeling():
         
         # Check if LDA topics file was created in MinIO
         lda_topics_object_name = f"{output_folder}/lda_topics.json"
-        wordcloud_object_name = f"{output_folder}/wordcloud.png"
+        wordcloud_object_name = f"{output_folder}/wordcloud.json"
         combined_analysis_object_name = f"{output_folder}/combined_analysis_report.json"
         
         lda_topics_data = minio_service.get_object_data(lda_topics_object_name)
@@ -194,9 +194,9 @@ async def test_instagram_topic_modeling():
             print(f"\n💾 LDA topics data saved to MinIO: {lda_topics_object_name}")
             
             if wordcloud_exists:
-                print(f"🖼️ WordCloud image saved to MinIO: {wordcloud_object_name}")
+                print(f"📊 WordCloud data saved to MinIO: {wordcloud_object_name}")
             else:
-                print("⚠️ WordCloud image was not generated or saved.")
+                print("⚠️ WordCloud data was not generated or saved.")
                 
             # Check if combined analysis report was created
             if combined_analysis_data:

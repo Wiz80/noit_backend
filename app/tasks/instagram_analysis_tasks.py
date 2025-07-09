@@ -241,6 +241,7 @@ async def complete_instagram_comments_analysis_task(
     
     db = None
     analysis_results = {} # Define analysis_results here to be available in except block
+    categories_result = {}
     try:
         db = SessionLocal()
         
@@ -296,8 +297,8 @@ async def complete_instagram_comments_analysis_task(
             await sentiment_analyzer.analyze_sentiment_and_emotions()
             analysis_results["sentiment_emotion"] = {
                 "status": "completed",
-                "sentiment_path": f"{output_folder}/sentiment_analysis.json",
-                "emotion_path": f"{output_folder}/emotion_analysis.json"
+                "sentiment_path": f"{output_folder}/{username}/sentiment_analysis.json",
+                "emotion_path": f"{output_folder}/{username}/emotion_analysis.json"
             }
             logger.info(f"✅ Sentiment and emotion analysis completed for {username}")
         except Exception as e:
@@ -320,12 +321,13 @@ async def complete_instagram_comments_analysis_task(
                 num_topics=num_topics,
                 lang=lang
             )
-            await topic_modeling.run_lda_analysis()
+            await topic_modeling.run_lda_analysis(dynamic_categories=categories_result)
             analysis_results["topic_modeling"] = {
                 "status": "completed",
                 "topics_count": num_topics,
-                "wordcloud_path": f"{output_folder}/wordcloud.png",
-                "topics_json_path": f"{output_folder}/lda_topics.json"
+                "wordcloud_path": f"{output_folder}/{username}/wordcloud.json",
+                "topics_json_path": f"{output_folder}/{username}/lda_topics.json",
+                "combined_analysis_path": f"{output_folder}/{username}/combined_analysis_report.json"
             }
             logger.info(f"✅ Topic modeling completed for {username}")
         except Exception as e:

@@ -9,6 +9,7 @@ from uuid import UUID
 import datetime
 import httpx
 from pydantic import BaseModel
+import os
 
 from app.services.storage.minio_service import MinioService
 from app.services.business.competitive_analysis.business_competitors_extraction import EnhancedBusinessAnalyzer, CompetitorInfo, BusinessModel
@@ -81,6 +82,10 @@ async def analyze_competitors(
         if not request:
             request = InternalCompetitorAnalysisRequest(business_id=business_id)
         
+        # Clean validator_model if it contains a provider prefix (e.g., "openai:gpt-4o-mini")
+        if ":" in request.validator_model:
+            request.validator_model = request.validator_model.split(":")[-1]
+            
         # Verify business idea exists
         business_idea = db.query(BusinessIdea).filter(BusinessIdea.id == business_id).first()
         if not business_idea:
@@ -180,7 +185,12 @@ async def analyze_competitors(
             logger.info(f"Created new research record with ID {request_id} for business {business_id} (triggered by {request.triggered_by})")
         
         # Create callback URL for research completion
-        callback_url = f"{request.base_url}/api/v1/webhooks/competitor-analysis-callback/{request_id}"
+        # Use environment variable or default to handle Docker networking
+        # For web-research-system (host) to callback to backend (Docker): use localhost:8000
+        callback_base_url = os.getenv("CALLBACK_BASE_URL", "http://localhost:8000")
+        callback_url = f"{callback_base_url}/api/v1/webhooks/competitor-analysis-callback/{request_id}"
+        
+        logger.info(f"Using callback URL: {callback_url}")
         
         # Initialize MinIO service for questions storage
         minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
@@ -257,7 +267,7 @@ async def analyze_competitors(
             prompt_search=request.search_prompt
         )
         
-        # Create the modified prompt with the combined search query
+        # Create the modified prompt with all necessary data for the research task
         modified_prompt = {
             "search_query": combined_prompt,
             "callback_url": callback_url,
@@ -265,7 +275,10 @@ async def analyze_competitors(
             "business_id": business_id,
             "base_url": request.base_url,
             "research_type": "competitor_analysis",
-            "triggered_by": request.triggered_by
+            "triggered_by": request.triggered_by,
+            "llm_provider": request.validator_provider,
+            "llm_model": request.validator_model,
+            "perplexity_model": request.research_model
         }
         
         # Start the analysis using TaskIQ instead of FastAPI background tasks

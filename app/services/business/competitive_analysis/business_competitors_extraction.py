@@ -129,12 +129,14 @@ class EnhancedBusinessAnalyzer:
                        validator_model: str = "gpt-4o-mini",
                        max_depth: int = 3,
                        research_model: str = "sonar-deep-research",
-                       db: sessionmaker = SessionLocal):
+                       db: sessionmaker = SessionLocal,
+                       research_client: Optional[Any] = None):
         
         self.lang = lang
         self.validator_provider = validator_provider
         self.validator_model = validator_model
         self.research_model = research_model
+        self.research_client = research_client  # Store the optional research client
 
         # Initialize LLM using LangChain
         try:
@@ -180,7 +182,13 @@ class EnhancedBusinessAnalyzer:
             {self.business_model.get_comprehensive_description()}
             """
             
-        self.research_module = self._init_research_module()
+        # Initialize research module only if no research client is provided
+        if self.research_client is None:
+            self.research_module = self._init_research_module()
+            logger.info("Initialized with traditional ResearchModule (n8n)")
+        else:
+            self.research_module = None
+            logger.info("Initialized with new WebResearchClient")
         
     def _init_research_module(self) -> ResearchModule:
         """Initialize the AI research module with proper configuration"""

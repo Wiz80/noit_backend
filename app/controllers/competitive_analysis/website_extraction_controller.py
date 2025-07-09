@@ -124,6 +124,8 @@ class WebsiteExtractionController:
             Dict: Información actualizada de redes sociales y estado
         """
         try:
+            logger.info(f"🔍 Iniciando actualización de redes sociales para competidor {competitor_id}")
+            
             # Obtener el registro del competidor
             competitor = db.query(Competitor).filter(
                 Competitor.id == competitor_id,
@@ -131,55 +133,93 @@ class WebsiteExtractionController:
             ).first()
             
             if not competitor:
+                logger.warning(f"❌ Competidor con ID {competitor_id} no encontrado en business {self.business_id}")
                 return {"status": "failed", "error": f"Competidor con ID {competitor_id} no encontrado"}
+            
+            logger.info(f"✅ Competidor encontrado: {competitor.competitor_name} (ID: {competitor_id})")
             
             # Verificar si el competidor tiene un sitio web
             if not competitor.website:
+                logger.info(f"⏭️ Competidor {competitor_id} no tiene URL de sitio web disponible")
                 return {"status": "skipped", "reason": "No hay URL de sitio web disponible"}
             
             # Extraer la URL base para el sitio web
             original_website = competitor.website
             base_website_url = self.extract_base_url(competitor.website)
-            logger.info(f"URL simplificada para extracción: {base_website_url} (original: {original_website})")
+            logger.info(f"🌐 URL simplificada para extracción: {base_website_url} (original: {original_website})")
             
             # Extraer información de redes sociales de la URL base del sitio web
+            logger.info(f"🔍 Iniciando extracción de redes sociales para {base_website_url}")
             social_media = await self.extract_social_media_from_website(base_website_url)
+            logger.info(f"📊 Resultados de extracción: {social_media}")
             
             # Actualizar registro del competidor con URLs de redes sociales extraídas
+            updated_fields = []
+            
             if social_media["instagram"]["url"]:
+                old_instagram = competitor.instagram_url
                 competitor.instagram_url = social_media["instagram"]["url"]
+                updated_fields.append(f"instagram: '{old_instagram}' -> '{competitor.instagram_url}'")
                 
             if social_media["facebook"]["url"]:
+                old_facebook = competitor.facebook_url
                 competitor.facebook_url = social_media["facebook"]["url"]
+                updated_fields.append(f"facebook: '{old_facebook}' -> '{competitor.facebook_url}'")
                 
             if social_media["twitter"]["url"]:
+                old_x = competitor.x_url
                 competitor.x_url = social_media["twitter"]["url"]
+                updated_fields.append(f"x/twitter: '{old_x}' -> '{competitor.x_url}'")
                 
             if social_media["linkedin"]["url"]:
+                old_linkedin = competitor.linkedin_url
                 competitor.linkedin_url = social_media["linkedin"]["url"]
+                updated_fields.append(f"linkedin: '{old_linkedin}' -> '{competitor.linkedin_url}'")
                 
             if social_media["youtube"]["url"]:
+                old_youtube = competitor.youtube_url
                 competitor.youtube_url = social_media["youtube"]["url"]
+                updated_fields.append(f"youtube: '{old_youtube}' -> '{competitor.youtube_url}'")
                 
             if social_media["tiktok"]["url"]:
+                old_tiktok = competitor.tiktok_url
                 competitor.tiktok_url = social_media["tiktok"]["url"]
-                
+                updated_fields.append(f"tiktok: '{old_tiktok}' -> '{competitor.tiktok_url}'")
+            
+            # Log the fields that will be updated
+            if updated_fields:
+                logger.info(f"📝 Actualizando campos para competidor {competitor_id}: {', '.join(updated_fields)}")
+            else:
+                logger.info(f"ℹ️ No se encontraron nuevas URLs de redes sociales para competidor {competitor_id}")
+            
             # Guardar cambios en la base de datos
+            logger.info(f"💾 Guardando cambios en la base de datos para competidor {competitor_id}")
             db.commit()
+            logger.info(f"✅ Cambios guardados exitosamente para competidor {competitor_id}")
             
             return {
                 "status": "success",
                 "competitor_id": competitor_id,
                 "original_website": original_website,
                 "scraped_website": base_website_url,
-                "social_media": social_media
+                "social_media": social_media,
+                "updated_fields": updated_fields
             }
             
         except Exception as e:
-            logger.error(f"Error actualizando redes sociales del competidor: {str(e)}")
+            logger.error(f"❌ Error actualizando redes sociales del competidor {competitor_id}: {str(e)}")
+            
+            # Rollback explícito en caso de error
+            try:
+                db.rollback()
+                logger.info(f"🔄 Rollback ejecutado para competidor {competitor_id}")
+            except Exception as rollback_error:
+                logger.error(f"❌ Error ejecutando rollback para competidor {competitor_id}: {str(rollback_error)}")
+            
             return {
                 "status": "failed",
-                "error": str(e)
+                "error": str(e),
+                "competitor_id": competitor_id
             }
             
     async def batch_update_competitors_social_media(self, competitor_ids: List[str], db: Session) -> Dict[str, Dict[str, Any]]:
@@ -201,43 +241,6 @@ class WebsiteExtractionController:
             
         return results
             
-    async def _correct_website_url_with_llm(self, website_url: str) -> str:
-        """
-        Corrige una URL de sitio web mal formada utilizando un LLM.
-        Si la corrección falla, devuelve la URL original.
-        """
-        if not website_url or not isinstance(website_url, str):
-            return ""
-        
-        try:
-            logger.info(f"Intentando corregir URL con LLM: {website_url}")
-            llm = LangChainLLMFactory.create_llm(
-                provider="openai",
-                model="gpt-4o-mini",
-                temperature=0.0,
-                max_tokens=150
-            )
-
-            prompt_template = ChatPromptTemplate.from_messages([
-                ("system", "You are an expert at cleaning and correcting website URLs. Your task is to take a potentially malformed URL and return ONLY the corrected, clean, and functional URL. Remove any extra spaces, fix typos, and ensure it's a valid web address. Do not include 'http://' or 'https://' unless it's necessary to fix the URL. Do not add any explanation, preamble, or markdown. Only output the corrected URL string. For example, if the input is 'https: //www.ibm.com/ai', the output should be 'www.ibm.com/ai'."),
-                ("human", "Please correct the following URL: '{url}'")
-            ])
-            
-            chain = prompt_template | llm
-            response = await chain.ainvoke({"url": website_url})
-            
-            corrected_url = response.content.strip().replace(" ", "")
-            
-            if not corrected_url or "." not in corrected_url:
-                logger.warning(f"LLM produjo una URL sospechosa '{corrected_url}' desde '{website_url}'. Se usará la original.")
-                return website_url
-
-            logger.info(f"LLM corrigió la URL: '{website_url}' -> '{corrected_url}'")
-            return corrected_url
-        except Exception as e:
-            logger.error(f"Error corrigiendo URL con LLM: {e}. Se usará la URL original.")
-            return website_url
-        
     async def run_website_social_media_extraction(
         self,
         competitor_ids: List[str],
@@ -281,25 +284,15 @@ class WebsiteExtractionController:
                         completed += 1
                         continue
                     
-                    # Corregir la URL del sitio web usando LLM
-                    original_website = competitor.website
-                    corrected_website_url = await self._correct_website_url_with_llm(original_website)
-
-                    # Actualizar la web del competidor en la BD si se corrigió y update_db es true
-                    if update_db and original_website != corrected_website_url:
-                        competitor.website = corrected_website_url
-                        db.commit()
-                        logger.info(f"Sitio web del competidor {competitor.id} actualizado de '{original_website}' a '{corrected_website_url}'")
-
-                    # Extraer redes sociales
+                    # Extraer redes sociales directamente sin corrección de URL
                     if update_db:
-                        # Usar el método existente que ahora extrae la URL base.
-                        # Este método usará el valor actualizado de la BD si se modificó.
+                        # Usar el método existente que actualiza la base de datos
                         result = await self.update_competitor_social_media(competitor_id, db)
                     else:
                         # Extraer la URL base para el sitio web
-                        base_website_url = self.extract_base_url(corrected_website_url)
-                        logger.info(f"URL simplificada para extracción: {base_website_url} (original: {original_website}, corregida: {corrected_website_url})")
+                        original_website = competitor.website
+                        base_website_url = self.extract_base_url(original_website)
+                        logger.info(f"URL simplificada para extracción: {base_website_url} (original: {original_website})")
                         
                         try:
                             # Extraer redes sociales sin actualizar la base de datos
@@ -309,7 +302,6 @@ class WebsiteExtractionController:
                                 "competitor_id": competitor_id,
                                 "original_website": original_website,
                                 "scraped_website": base_website_url,
-                                "corrected_website": corrected_website_url,
                                 "social_media": social_media
                             }
                         except Exception as e:
@@ -320,7 +312,6 @@ class WebsiteExtractionController:
                                 "competitor_id": competitor_id,
                                 "original_website": original_website,
                                 "scraped_website": base_website_url,
-                                "corrected_website": corrected_website_url,
                             }
                     
                     results[competitor_id] = result

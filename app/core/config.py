@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     MINIO_ENDPOINT: str = os.getenv("MINIO_ENDPOINT")
     MINIO_REGION: str = os.getenv("MINIO_REGION")
     MINIO_BUCKET_NAME: str = os.getenv("MINIO_BUCKET_NAME", "noit-businesses")
+    MINIO_RESEARCH_BUCKET_NAME: str = os.getenv("MINIO_RESEARCH_BUCKET_NAME", "noit-research-storage")
     
     # Redis
     REDIS_HOST: str = os.getenv("REDIS_HOST", "redis")

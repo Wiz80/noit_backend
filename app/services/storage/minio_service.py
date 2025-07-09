@@ -30,6 +30,11 @@ class MinioService:
         self._region = region
         self._connection_timeout = connection_timeout
         self._client = None
+
+        logger.info("--- noit_backend MinIO Configuration ---")
+        logger.info(f"Endpoint: {self._endpoint}")
+        logger.info(f"Bucket: {self._bucket_name}")
+        logger.info("------------------------------------")
         
     @property
     def bucket_name(self):

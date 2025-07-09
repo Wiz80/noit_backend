@@ -517,13 +517,34 @@ El JSON debe tener formato de diccionario con claves para las categorías y valo
     async def load_comments(self):
         """Loads Instagram comments from MinIO."""
         try:
-            # Correct path with username included
+            # Try the correct path first
             object_path = f"{self.output_folder}/{self.username}/processed_comments_data.json"
             comments_json = self.minio_service.get_object_data(object_path)
             
+            # If not found, try alternative legacy paths for backward compatibility
             if not comments_json:
-                print(f"❌ No comment data found at {object_path}")
-                return []
+                print(f"⚠️ No data found at primary path: {object_path}")
+                
+                # Try legacy path 1: with 'businesses' prefix
+                legacy_path_1 = f"businesses/{self.output_folder}/{self.username}/processed_comments_data.json"
+                print(f"🔍 Trying legacy path 1: {legacy_path_1}")
+                comments_json = self.minio_service.get_object_data(legacy_path_1)
+                
+                if comments_json:
+                    print(f"✅ Found data at legacy path 1: {legacy_path_1}")
+                else:
+                    # Try legacy path 2: old instagram structure
+                    # Extract business_id from output_folder
+                    business_id = self.output_folder.split('/')[0] if '/' in self.output_folder else self.output_folder
+                    legacy_path_2 = f"businesses/{business_id}/instagram/{self.username}/processed_comments_data.json"
+                    print(f"🔍 Trying legacy path 2: {legacy_path_2}")
+                    comments_json = self.minio_service.get_object_data(legacy_path_2)
+                    
+                    if comments_json:
+                        print(f"✅ Found data at legacy path 2: {legacy_path_2}")
+                    else:
+                        print(f"❌ No comment data found at any path")
+                        return []
                 
             # Parse the JSON into a list (not dictionary)
             posts_list = json.loads(comments_json)

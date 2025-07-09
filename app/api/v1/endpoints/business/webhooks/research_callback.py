@@ -383,6 +383,36 @@ async def competitor_analysis_callback(
 ) -> JSONResponse:
     """
     Dedicated webhook endpoint for competitor analysis callbacks.
+    
+    This endpoint handles callbacks from both:
+    1. Legacy n8n workflow system
+    2. New noit-web-research-system (CrewAI-based)
+    
+    Expected callback body structure:
+    ```json
+    {
+      "research_id": "id_from_web_research_system",
+      "query": "original_research_query",
+      "status": "completed",
+      "directory_path": "path_in_minio",
+      "research_content": "summary_of_research_results",
+      "research_files": ["list", "of", "generated", "files"],
+      "tasks": [
+        {
+          "id": "task_id",
+          "task_query": "specific_task_query",
+          "status": "completed",
+          "minio_file_path": "path/to/task/result.md"
+        }
+      ],
+      "business_id": "business_id_from_request",
+      "request_id": "request_id_from_original_request",
+      "research_type": "competitor_analysis"
+    }
+    ```
+    
+    For legacy n8n callbacks, the body may contain different fields but will be
+    processed by the same controller logic.
     """
     logger.info(f"COMPETITOR ANALYSIS CALLBACK received for request: {request_id}")
     
@@ -404,6 +434,15 @@ async def competitor_analysis_callback(
                 logger.error(f"Failed to parse JSON from callback body: {body_str}")
                 return JSONResponse(status_code=400, content={"message": "Invalid JSON in callback body"})
 
+        # Detect callback source based on payload structure
+        callback_source = "unknown"
+        if "research_id" in body_json and "research_content" in body_json:
+            callback_source = "web_research_system"
+            logger.info("Detected callback from noit-web-research-system")
+        elif "text" in body_json or "search_prompt" in body_json:
+            callback_source = "n8n_legacy"
+            logger.info("Detected callback from legacy n8n system")
+
         # Manually add business_id and request_id if they are not in the main body
         if "request_id" not in body_json:
             body_json["request_id"] = request_id
@@ -412,6 +451,9 @@ async def competitor_analysis_callback(
         research = db.query(CompetitorResearch).filter(CompetitorResearch.id == request_id).first()
         if research and "business_id" not in body_json:
             body_json["business_id"] = research.business_id
+        
+        # Add callback source information for processing
+        body_json["callback_source"] = callback_source
 
         # Instantiate the controller and process the data
         from app.controllers.competitive_analysis.webhook_controller import WebhookController
@@ -427,6 +469,7 @@ async def competitor_analysis_callback(
             content={
                 "message": "Competitor analysis callback processed successfully.",
                 "request_id": request_id,
+                "callback_source": callback_source,
                 "status": "success"
             }
         )

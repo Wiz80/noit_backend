@@ -12,6 +12,56 @@ class WebsiteSocialMediaScrapingResponse(BaseModel):
     status: str
     results: Optional[dict]
 
+# Schema for website correction request
+class WebsiteCorrectionRequest(BaseModel):
+    competitor_ids: Optional[List[str]] = Field(None, description="Optional: specific competitor IDs to correct. If empty/null, ALL competitors for the business will be processed (default behavior)")
+    force_update: bool = Field(False, description="Whether to force update already correct URLs")
+
+# Schema for corrected website data
+class CorrectedWebsite(BaseModel):
+    competitor_id: str
+    competitor_name: str
+    original_website: Optional[str]
+    corrected_website: Optional[str]
+    was_corrected: bool
+    confidence_score: Optional[float] = None
+
+# Schema for website correction response
+class WebsiteCorrectionResponse(BaseModel):
+    business_id: str
+    total_competitors: int
+    corrected_count: int
+    skipped_count: int
+    corrected_websites: List[CorrectedWebsite]
+    success: bool
+    message: Optional[str] = None
+
+# Schema for Instagram URL correction request
+class InstagramCorrectionRequest(BaseModel):
+    competitor_ids: Optional[List[str]] = Field(None, description="Optional: specific competitor IDs to correct. If empty/null, ALL competitors for the business will be processed (default behavior)")
+    force_update: bool = Field(False, description="Whether to force update already existing Instagram URLs")
+
+# Schema for corrected Instagram URL data
+class CorrectedInstagramUrl(BaseModel):
+    competitor_id: str
+    competitor_name: str
+    competitor_website: Optional[str]
+    original_instagram_url: Optional[str]
+    corrected_instagram_url: Optional[str]
+    was_corrected: bool
+    confidence_score: Optional[float] = None
+    reasoning: Optional[str] = None
+
+# Schema for Instagram URL correction response
+class InstagramCorrectionResponse(BaseModel):
+    business_id: str
+    total_competitors: int
+    corrected_count: int
+    skipped_count: int
+    corrected_instagram_urls: List[CorrectedInstagramUrl]
+    success: bool
+    message: Optional[str] = None
+
 class CompetitorAnalysisRequest(BaseModel):
     """Request model for competitor analysis"""
     search_prompt: str = Field(..., description="The search prompt to use for researching competitors")

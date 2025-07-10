@@ -326,8 +326,7 @@ async def get_posts_image_analysis(
     Get the posts image analysis results for a specific Instagram username.
     
     Args:
-        business_id: UUID of the business idea
-        instagram_username: Instagram username to get analysis for
+        competitor_id: ID of the competitor to get analysis for
         db: Database session
         
     Returns:
@@ -349,7 +348,7 @@ async def get_posts_image_analysis(
         
         output_folder = f"{competitor.business_idea_id}/competitor-analysis/instagram"
         minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
-        analysis_object_name = f"{output_folder}/{username}/posts_image_analysis_report.json"
+        analysis_object_name = f"{output_folder}/{username}/image_analysis.json"
         
         try:
             # Get JSON data from MinIO
@@ -376,8 +375,7 @@ async def get_feed_analysis(
     Get the feed analysis results for a specific Instagram username.
     
     Args:
-        business_id: UUID of the business idea
-        instagram_username: Instagram username to get analysis for
+        competitor_id: ID of the competitor to get analysis for
         db: Database session
         
     Returns:
@@ -391,7 +389,7 @@ async def get_feed_analysis(
         
         # get the username from the competitor
         # example: https://www.instagram.com/intel
-        username = competitor.instagram_url.split("/")[-1]
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
         
         # Get data from MinIO
         from app.services.storage.minio_service import MinioService
@@ -413,6 +411,104 @@ async def get_feed_analysis(
             
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error fetching feed analysis: {str(e)}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/image-analysis-report/{competitor_id}")
+async def get_image_analysis_report(
+    competitor_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get the complete image analysis report for a specific Instagram username.
+    
+    Args:
+        competitor_id: ID of the competitor to get analysis for
+        db: Database session
+        
+    Returns:
+        dict: Complete image analysis report data
+    """
+    try:
+        # Verify if competitor_id exists
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
+        
+        # Get data from MinIO
+        from app.services.storage.minio_service import MinioService
+        import json
+        
+        output_folder = f"{competitor.business_idea_id}/competitor-analysis/instagram"
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
+        analysis_object_name = f"{output_folder}/{username}/image_analysis_report.json"
+        
+        try:
+            # Get JSON data from MinIO
+            analysis_data = minio_service.get_object_data(analysis_object_name)
+            if not analysis_data:
+                raise HTTPException(status_code=404, detail="Image analysis report not found")
+                
+            # Parse JSON data
+            analysis = json.loads(analysis_data.decode('utf-8'))
+            return analysis
+            
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error fetching image analysis report: {str(e)}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/img-posts/{competitor_id}")
+async def get_img_posts(
+    competitor_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get the img_posts.json file for a specific Instagram username.
+    
+    Args:
+        competitor_id: ID of the competitor to get data for
+        db: Database session
+        
+    Returns:
+        dict: img_posts.json data
+    """
+    try:
+        # Verify if competitor_id exists
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
+        
+        # Get data from MinIO
+        from app.services.storage.minio_service import MinioService
+        import json
+        
+        output_folder = f"{competitor.business_idea_id}/competitor-analysis/instagram"
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
+        analysis_object_name = f"{output_folder}/{username}/img_posts.json"
+        
+        try:
+            # Get JSON data from MinIO
+            analysis_data = minio_service.get_object_data(analysis_object_name)
+            if not analysis_data:
+                raise HTTPException(status_code=404, detail="img_posts.json not found")
+                
+            # Parse JSON data
+            analysis = json.loads(analysis_data.decode('utf-8'))
+            return analysis
+            
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error fetching img_posts.json: {str(e)}")
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

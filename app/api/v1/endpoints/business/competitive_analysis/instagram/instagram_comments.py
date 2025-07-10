@@ -765,21 +765,20 @@ async def get_topic_analysis(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/combined-analysis/{competitor_id}")
-async def get_combined_analysis(
+@router.get("/dynamic-comments-categories/{competitor_id}")
+async def get_dynamic_comments_categories(
     competitor_id: str,
     db: Session = Depends(get_db)
 ):
     """
-    Obtiene el análisis combinado de categorías y temas para un usuario de Instagram específico.
+    Obtiene las categorías dinámicas de comentarios para un usuario de Instagram específico.
     
     Args:
-        business_id: UUID del business idea
-        username: Nombre de usuario de Instagram analizado
+        competitor_id: ID del competidor a analizar
         db: Sesión de base de datos
         
     Returns:
-        dict: Análisis combinado con insights
+        dict: Categorías dinámicas de comentarios
     """
     try:
         competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
@@ -802,12 +801,12 @@ async def get_combined_analysis(
         business_id = competitor.business_idea_id
         
         # Ruta del archivo
-        file_path = f"{business_id}/competitor-analysis/instagram/{username}/combined_analysis_report.json"
+        file_path = f"{business_id}/competitor-analysis/instagram/{username}/dynamic_categorized_comments.json"
         
         # Obtener datos del archivo
         file_data = minio_service.get_object_data(file_path)
         if not file_data:
-            raise HTTPException(status_code=404, detail="Combined analysis data not found")
+            raise HTTPException(status_code=404, detail="Dynamic comments categories data not found")
         
         # Devolver contenido del archivo
         return Response(
@@ -863,6 +862,112 @@ async def get_wordcloud(
             raise HTTPException(status_code=404, detail="Wordcloud data not found")
         
         # Devolver los datos JSON
+        return Response(
+            content=file_data,
+            media_type="application/json"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/processed-comments-data/{competitor_id}")
+async def get_processed_comments_data(
+    competitor_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene los datos de comentarios procesados para un usuario de Instagram específico.
+    
+    Args:
+        competitor_id: ID del competidor a analizar
+        db: Sesión de base de datos
+        
+    Returns:
+        dict: Datos de comentarios procesados
+    """
+    try:
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
+        
+        # Verificar si el usuario existe
+        instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
+        if not instagram_user:
+            raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
+        
+        # Inicializar servicio MinIO
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
+        
+        # get the business_id from the competitor
+        business_id = competitor.business_idea_id
+        
+        # Ruta del archivo
+        file_path = f"{business_id}/competitor-analysis/instagram/{username}/processed_comments_data.json"
+        
+        # Obtener datos del archivo
+        file_data = minio_service.get_object_data(file_path)
+        if not file_data:
+            raise HTTPException(status_code=404, detail="Processed comments data not found")
+        
+        # Devolver contenido del archivo
+        return Response(
+            content=file_data,
+            media_type="application/json"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/combined-analysis/{competitor_id}")
+async def get_combined_analysis(
+    competitor_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Obtiene el análisis combinado de categorías y temas para un usuario de Instagram específico.
+    
+    Args:
+        competitor_id: ID del competidor a analizar
+        db: Sesión de base de datos
+        
+    Returns:
+        dict: Análisis combinado con insights
+    """
+    try:
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
+        
+        # Verificar si el usuario existe
+        instagram_user = db.query(InstagramUserInfo).filter_by(username=username).first()
+        if not instagram_user:
+            raise HTTPException(status_code=404, detail=f"Instagram user {username} not found")
+        
+        # Inicializar servicio MinIO
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
+        
+        # get the business_id from the competitor
+        business_id = competitor.business_idea_id
+        
+        # Ruta del archivo
+        file_path = f"{business_id}/competitor-analysis/instagram/{username}/combined_analysis_report.json"
+        
+        # Obtener datos del archivo
+        file_data = minio_service.get_object_data(file_path)
+        if not file_data:
+            raise HTTPException(status_code=404, detail="Combined analysis data not found")
+        
+        # Devolver contenido del archivo
         return Response(
             content=file_data,
             media_type="application/json"

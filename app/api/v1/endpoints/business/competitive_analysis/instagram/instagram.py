@@ -311,6 +311,104 @@ async def cancel_instagram_analysis(task_id: str, db: Session = Depends(get_db))
 
     return {"message": "Instagram analysis cancelled successfully"}
 
+@router.get("/instagram-posts/{competitor_id}")
+async def get_instagram_posts(
+    competitor_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get the Instagram posts data for a specific competitor.
+    
+    Args:
+        competitor_id: ID of the competitor to get posts for
+        db: Database session
+        
+    Returns:
+        dict: Instagram posts data
+    """
+    try:
+        # Verify if competitor_id exists
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
+        
+        # Get data from MinIO
+        from app.services.storage.minio_service import MinioService
+        import json
+        
+        output_folder = f"{competitor.business_idea_id}/competitor-analysis/instagram"
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
+        posts_object_name = f"{output_folder}/{username}/instagram_posts.json"
+        
+        try:
+            # Get JSON data from MinIO
+            posts_data = minio_service.get_object_data(posts_object_name)
+            if not posts_data:
+                raise HTTPException(status_code=404, detail="Instagram posts data not found")
+                
+            # Parse JSON data
+            posts = json.loads(posts_data.decode('utf-8'))
+            return posts
+            
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error fetching Instagram posts: {str(e)}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/instagram-profile/{competitor_id}")
+async def get_instagram_profile(
+    competitor_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get the Instagram profile data for a specific competitor.
+    
+    Args:
+        competitor_id: ID of the competitor to get profile for
+        db: Database session
+        
+    Returns:
+        dict: Instagram profile data
+    """
+    try:
+        # Verify if competitor_id exists
+        competitor = db.query(Competitor).filter(Competitor.id == competitor_id).first()
+        if not competitor:
+            raise HTTPException(status_code=404, detail="Competitor not found")
+        
+        # get the username from the competitor
+        # example: https://www.instagram.com/intel
+        username = competitor.instagram_url.rstrip("/").split("/")[-1]
+        
+        # Get data from MinIO
+        from app.services.storage.minio_service import MinioService
+        import json
+        
+        output_folder = f"{competitor.business_idea_id}/competitor-analysis/instagram"
+        minio_service = MinioService(bucket_name=settings.MINIO_BUCKET_NAME)
+        profile_object_name = f"{output_folder}/{username}/instagram_profile.json"
+        
+        try:
+            # Get JSON data from MinIO
+            profile_data = minio_service.get_object_data(profile_object_name)
+            if not profile_data:
+                raise HTTPException(status_code=404, detail="Instagram profile data not found")
+                
+            # Parse JSON data
+            profile = json.loads(profile_data.decode('utf-8'))
+            return profile
+            
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error fetching Instagram profile: {str(e)}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @router.post("/{business_id}/correct-instagram-urls", response_model=InstagramCorrectionResponse)

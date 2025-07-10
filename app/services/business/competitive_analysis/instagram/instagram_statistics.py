@@ -129,10 +129,6 @@ class InstagramStatistics(BaseInstagramAnalyzer):
         :param username: Instagram username for which statistics will be generated.
         :return: Path of the saved statistics JSON file.
         """
-        # Define local file paths
-        base_dir = os.path.join(os.getcwd(), f"Instagram_{self.username}")
-        os.makedirs(base_dir, exist_ok=True)  # Ensure directory exists
-
         posts_data = self.serialize_posts(self.minio_service.get_object_data(f"{self.output_folder}/img_posts.json"))
 
         # Load user and post data
@@ -187,5 +183,5 @@ class InstagramStatistics(BaseInstagramAnalyzer):
             }
         )
 
-        print(f"✅ Statistics saved locally: {self.output_folder}/statistics.json")
+        print(f"✅ Statistics saved to MinIO: {self.output_folder}/statistics.json")
         return f"{self.output_folder}/statistics.json"

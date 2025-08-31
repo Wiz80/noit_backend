@@ -3,7 +3,7 @@ services:
     image: postgres:14
     volumes:
       - /data/postgres/pgdata:/var/lib/postgresql/data
-      - ./init-scripts:/docker-entrypoint-initdb.d
+      - ./postgres-init.sh:/docker-entrypoint-initdb.d/postgres-init.sh
     env_file:
       - .env
     environment:
